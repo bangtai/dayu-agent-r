@@ -22,7 +22,7 @@ from dayu.fins.storage import (
     SourceDocumentRepositoryProtocol,
 )
 
-from .sec_download_state import _normalize_rebuild_file_entries, _resolve_rebuild_source_fingerprint
+from .sec_download_state import _normalize_rebuild_file_entries
 from .sec_fiscal_fields import (
     _coerce_optional_int,
     _normalize_optional_period,
@@ -102,7 +102,6 @@ def rebuild_download_artifacts(
     start_date: Optional[str],
     end_date: Optional[str],
     overwrite: bool,
-    pipeline_download_version: str,
     expand_form_aliases: Callable[[list[str]], list[str]],
     split_form_input: Callable[[str], list[str]],
     parse_date: Callable[[str, bool], dt.date],
@@ -117,7 +116,6 @@ def rebuild_download_artifacts(
         start_date: 可选起始 filing date。
         end_date: 可选结束 filing date。
         overwrite: 是否覆盖既有 meta。
-        pipeline_download_version: 当前 SEC 下载版本。
         expand_form_aliases: SEC form 筛选别名展开函数。
         split_form_input: form 输入拆分函数。
         parse_date: 日期解析函数。
@@ -173,7 +171,6 @@ def rebuild_download_artifacts(
             document_id=document_id,
             previous_meta=previous_meta,
             company_meta=company_meta,
-            pipeline_download_version=pipeline_download_version,
         )
         filing_results.append(filing_result)
         host._log_filing_download_result(ticker=ticker, filing_result=filing_result)
@@ -291,7 +288,6 @@ def rebuild_single_local_filing(
     document_id: str,
     previous_meta: dict[str, JsonValue],
     company_meta: Optional[CompanyMeta],
-    pipeline_download_version: str,
 ) -> dict[str, JsonValue]:
     """重建单个本地 filing 的 meta/manifest。
 
@@ -302,7 +298,6 @@ def rebuild_single_local_filing(
         document_id: 文档 ID。
         previous_meta: 当前完成态 source meta。
         company_meta: 可选公司元数据。
-        pipeline_download_version: 当前下载版本。
 
     Returns:
         单文档重建结果。
@@ -348,10 +343,6 @@ def rebuild_single_local_filing(
             "rebuild": True,
         }
 
-    source_fingerprint = _resolve_rebuild_source_fingerprint(
-        previous_meta=previous_meta,
-        file_entries=file_entries,
-    )
     primary_document = str(previous_meta.get("primary_document", "")).strip() or str(file_entries[0]["name"])
     source_handle = SourceHandle(
         ticker=ticker,
@@ -395,12 +386,11 @@ def rebuild_single_local_filing(
         "is_deleted": bool(previous_meta.get("is_deleted", False)),
         "deleted_at": previous_meta.get("deleted_at"),
         "document_version": document_version,
-        "source_fingerprint": source_fingerprint,
         "amended": amended,
-        "download_version": pipeline_download_version,
         "created_at": created_at,
         "updated_at": now_iso8601(),
     }
+    # 下载认证只由正式远端全集下载产生；仓储 merge 保留已有指纹与下载版本。
     try:
         has_xbrl = source_repository.has_filing_xbrl_instance(
             ticker=ticker,

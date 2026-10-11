@@ -12,10 +12,11 @@ import logging
 import datetime as dt
 from collections.abc import AsyncIterator, Callable, Mapping
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path, PurePosixPath
 from threading import Event
+from types import MappingProxyType
 from typing import BinaryIO, Literal, Optional, cast
 
 import pytest
@@ -83,6 +84,8 @@ from dayu.fins.pipelines.sec_pipeline import (
     SEC_PIPELINE_DOWNLOAD_VERSION,
     SecPipeline as _SecPipeline,
 )
+from dayu.fins.pipelines.sec_safe_meta_access import read_published_source_fingerprint, resolve_document_version
+from dayu.fins.pipelines.sec_form_utils import increment_document_version
 from dayu.fins.pipelines.sec_sc13_filtering import SC13_FORMS as _SC13_FORMS, SC13_RETRY_MAX as _SC13_RETRY_MAX
 from dayu.fins.storage import (
     FsBatchingRepository,
@@ -731,6 +734,36 @@ def test_sec_pipeline_rejection_helpers_consume_typed_registry() -> None:
 class StubDownloader:
     """用于测试的下载器桩。"""
 
+    MODULE = SecDownloader.MODULE
+
+    async def list_filing_image_files(
+        self, *, cik: str, accession_no_dash: str, html_payloads: Mapping[str, bytes],
+        existing_files: list[RemoteFileDescriptor], include_http_metadata: bool,
+        cancellation_checker: Callable[[], bool] | None = None,
+    ) -> list[RemoteFileDescriptor]:
+        """复用真实发现 owner 校验桩提供的待发布字节。
+
+        Args:
+            cik: 测试 CIK。
+            accession_no_dash: 测试 accession。
+            html_payloads: 桩预取的 HTML。
+            existing_files: 基础描述符。
+            include_http_metadata: 元数据策略。
+            cancellation_checker: 取消检查器。
+
+        Returns:
+            真实 owner 产生的新增依赖。
+
+        Raises:
+            SecHtmlImageDependencyError: 桩正文存在非法依赖时抛出。
+        """
+
+        return await SecDownloader.list_filing_image_files(
+            cast(SecDownloader, self), cik=cik, accession_no_dash=accession_no_dash,
+            html_payloads=html_payloads, existing_files=existing_files,
+            include_http_metadata=include_http_metadata, cancellation_checker=cancellation_checker,
+        )
+
     def __init__(
         self,
         submissions: dict[str, JsonValue],
@@ -938,7 +971,7 @@ class StubDownloader:
             无。
         """
 
-        del allow_not_modified, existing_files, primary_document, cancellation_checker
+        del existing_files, primary_document, cancellation_checker
         self.download_files_called = True
         descriptors = {item.name: item for item in remote_files}
         for item in self._download_results:
@@ -956,7 +989,7 @@ class StubDownloader:
                 )
             yield _PrefetchStarted(descriptor=descriptor)
             status = item.get("status")
-            if status == "downloaded":
+            if status == "downloaded" or (status == "skipped" and not allow_not_modified):
                 payload = self._content_by_name.get(name, f"dummy:{name}".encode())
                 yield _PrefetchedFile(
                     descriptor=descriptor,
@@ -2383,9 +2416,8 @@ def test_sec_pipeline_rebuild_local_meta_manifest_without_redownload(tmp_path: P
 
     rebuilt_meta = json.loads(meta_path.read_text(encoding="utf-8"))
     assert rebuilt_meta["document_version"] == "v7"
-    assert isinstance(rebuilt_meta["source_fingerprint"], str)
-    assert rebuilt_meta["source_fingerprint"]
-    assert rebuilt_meta["download_version"] == SEC_PIPELINE_DOWNLOAD_VERSION
+    assert rebuilt_meta["source_fingerprint"] == ""
+    assert rebuilt_meta["download_version"] == "legacy_download_version"
     rebuilt_processed_meta = processed_repository.get_processed_meta(ticker, document_id)
     assert rebuilt_processed_meta["reprocess_required"] is False
     assert blob_repository.read_file_bytes(source_handle, "sample-10k.htm") == source_bytes_before
@@ -2447,7 +2479,6 @@ def test_sec_rebuild_rolls_back_once_and_reraises_cancellation_identity(
             document_id="fil_0000000000-25-000001",
             previous_meta=_sec_rebuild_previous_meta(),
             company_meta=None,
-            pipeline_download_version=SEC_PIPELINE_DOWNLOAD_VERSION,
         )
 
     assert exc_info.value is cancellation
@@ -2498,7 +2529,6 @@ def test_sec_rebuild_operation_and_rollback_failure_preserve_primary_exception(
             document_id="fil_0000000000-25-000001",
             previous_meta=_sec_rebuild_previous_meta(),
             company_meta=None,
-            pipeline_download_version=SEC_PIPELINE_DOWNLOAD_VERSION,
         )
 
     assert exc_info.value is operation_error
@@ -2550,7 +2580,6 @@ def test_sec_rebuild_ordinary_failure_with_successful_rollback_returns_failed_re
         document_id="fil_0000000000-25-000001",
         previous_meta=_sec_rebuild_previous_meta(),
         company_meta=None,
-        pipeline_download_version=SEC_PIPELINE_DOWNLOAD_VERSION,
     )
 
     assert result["status"] == "failed"
@@ -2619,17 +2648,10 @@ def test_sec_rebuild_filter_contract(
     )
 
 
-def test_sec_rebuild_state_preserves_published_fingerprint() -> None:
-    """rebuild state owner 应保留既有指纹，且缺席 meta 不得命中当前版本。"""
+def test_sec_download_version_rejects_absent_meta() -> None:
+    """无参数；返回无；缺席来源元数据被认证为当前下载版本时断言失败。"""
 
     assert _sec_download_state.has_current_download_version(None, SEC_PIPELINE_DOWNLOAD_VERSION) is False
-    assert (
-        _sec_download_state._resolve_rebuild_source_fingerprint(
-            previous_meta={"source_fingerprint": "published-fingerprint"},
-            file_entries=[],
-        )
-        == "published-fingerprint"
-    )
 
 
 def test_sec_pipeline_download_prefers_dei_fiscal_when_available(
@@ -3070,6 +3092,52 @@ def test_sec_fiscal_payload_and_query_extractors_fail_closed() -> None:
     ) == (2021, None)
 
 
+@pytest.mark.parametrize("meta,expected", [
+    pytest.param(None, None, id="no-publication"),
+    pytest.param({}, None, id="missing"),
+    pytest.param({"source_fingerprint": None}, None, id="null"),
+    pytest.param({"source_fingerprint": False}, None, id="false"),
+    pytest.param({"source_fingerprint": True}, None, id="true"),
+    pytest.param({"source_fingerprint": 0}, None, id="zero"),
+    pytest.param({"source_fingerprint": 42}, None, id="integer"),
+    pytest.param({"source_fingerprint": 0.0}, None, id="float-zero"),
+    pytest.param({"source_fingerprint": 1.25}, None, id="float"),
+    pytest.param({"source_fingerprint": []}, None, id="empty-array"),
+    pytest.param({"source_fingerprint": ["known"]}, None, id="array"),
+    pytest.param({"source_fingerprint": {}}, None, id="empty-mapping"),
+    pytest.param({"source_fingerprint": {"fingerprint": "known"}}, None, id="mapping"),
+    pytest.param({"source_fingerprint": ""}, None, id="empty-string"),
+    pytest.param({"source_fingerprint": " \t\r\n"}, None, id="whitespace"),
+    pytest.param({"source_fingerprint": "known"}, "known", id="known-string"),
+    pytest.param({"source_fingerprint": " \tknown\r\n"}, "known", id="stripped-string"),
+    pytest.param(MappingProxyType({"source_fingerprint": "not-hex"}), "not-hex", id="immutable-mapping"),
+])
+def test_sec_published_fingerprint_owner_contract(meta: Mapping[str, JsonValue] | None, expected: str | None) -> None:
+    """参数为所有 JSON 类型及期望认证；返回无；未知值被转换或已知字符串被改变时断言失败。"""
+    assert read_published_source_fingerprint(meta) == expected
+
+
+@pytest.mark.parametrize("fingerprint,expected", [
+    (None, "v7"), (False, "v7"), (True, "v7"), (0, "v7"), (42, "v7"),
+    (0.0, "v7"), (1.25, "v7"), ([], "v7"), (["known"], "v7"), ({}, "v7"),
+    ({"fingerprint": "known"}, "v7"), ("", "v7"), (" \t\n", "v7"),
+    ("new-fingerprint", "v7"), (" \tnew-fingerprint\n", "v7"), ("old-fingerprint", "v8"),
+])
+def test_sec_document_version_uses_known_published_fingerprint(fingerprint: JsonValue, expected: str) -> None:
+    """参数为旧指纹与期望版本；返回无；未知指纹错误升位或已知变化不升位时断言失败。"""
+    assert resolve_document_version(
+        {"source_fingerprint": fingerprint, "document_version": "v7"}, "new-fingerprint",
+        increment_document_version=increment_document_version,
+    ) == expected
+    assert resolve_document_version(
+        {"document_version": "v7"}, "new-fingerprint",
+        increment_document_version=increment_document_version,
+    ) == "v7"
+    assert resolve_document_version(
+        None, "new-fingerprint", increment_document_version=increment_document_version,
+    ) == "v1"
+
+
 def test_sec_pipeline_skip_when_meta_matches(tmp_path: Path) -> None:
     """验证 meta 指纹一致时跳过下载。
 
@@ -3150,18 +3218,18 @@ def test_sec_pipeline_skip_with_etag_gzip_variant_without_re_download(tmp_path: 
 @pytest.mark.parametrize(
     ("existing_download_version", "expected_status", "expected_skip_reason"),
     [
-        (SEC_PIPELINE_DOWNLOAD_VERSION, "skipped", "integrity_complete"),
-        ("legacy-download-version", "skipped", "integrity_complete"),
-        (None, "skipped", "integrity_complete"),
+        (SEC_PIPELINE_DOWNLOAD_VERSION, "downloaded", None),
+        ("legacy-download-version", "downloaded", None),
+        (None, "downloaded", None),
     ],
 )
-def test_sec_pipeline_all_files_not_modified_respects_download_version(
+def test_sec_pipeline_unconditional_prefetch_respects_download_version(
     tmp_path: Path,
     existing_download_version: str | None,
     expected_status: str,
     expected_skip_reason: str | None,
 ) -> None:
-    """全文件未修改只能在 current download version 下形成 terminal skip。
+    """无快跳资格且完整远端集合不等价时，必须取得 unconditional replacement。
 
     Args:
         tmp_path: pytest 临时目录。
@@ -3205,17 +3273,9 @@ def test_sec_pipeline_all_files_not_modified_respects_download_version(
     result = pipeline.download(ticker="AAPL", overwrite=False, start_is_explicit=False)
     after_text = meta_path.read_text(encoding="utf-8")
 
-    assert downloader.download_files_called is False
+    assert downloader.download_files_called is True
     assert result["filings"][0]["status"] == expected_status
     assert result["filings"][0].get("skip_reason") == expected_skip_reason
-    if expected_skip_reason == "integrity_complete":
-        assert result["summary"]["skipped"] == 1
-        assert result["summary"]["downloaded"] == 0
-        assert before_text == after_text
-        assert result["filings"][0]["reason_code"] == "integrity_complete"
-        assert "完整" in str(result["filings"][0]["reason_message"])
-        return
-
     assert result["summary"]["skipped"] == 0
     assert result["summary"]["downloaded"] == 1
     assert before_text != after_text
@@ -5069,7 +5129,7 @@ def test_sc13_no_retry_when_found_in_initial_window(tmp_path: Path) -> None:
             "files": [],
         }
     }
-    remote_files = [_make_descriptor("etag-sc13")]
+    remote_files = [replace(_make_descriptor("etag-sc13"), name="sc13g.htm", source_url="https://example.com/sc13g.htm")]
     downloader = StubDownloader(
         submissions=submissions,
         remote_files=remote_files,
@@ -5127,7 +5187,7 @@ def test_sc13_retry_expands_window_and_finds_filing(tmp_path: Path) -> None:
     remote_files = [_make_descriptor("etag-v1")]
     downloader = StubDownloader(
         submissions=submissions,
-        remote_files=remote_files,
+        remote_files=[replace(descriptor, name="sc13g-old.htm", source_url="https://example.com/sc13g-old.htm") for descriptor in remote_files],
         download_results=[
             {
                 "name": "sc13g-old.htm",

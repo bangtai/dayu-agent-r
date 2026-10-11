@@ -127,6 +127,7 @@ from dayu.fins.pipelines.sec_rebuild_workflow import (
     rebuild_download_artifacts as _rebuild_download_artifacts_impl,
 )
 from dayu.fins.pipelines.sec_safe_meta_access import (
+    read_published_source_fingerprint,
     resolve_document_version as _resolve_document_version_impl,
     safe_get_company_meta as _safe_get_company_meta_impl,
     safe_get_document_meta as _safe_get_document_meta_impl,
@@ -169,7 +170,7 @@ from dayu.fins.storage import (
 )
 from dayu.fins.storage._fs_repository_factory import build_fs_repository_set
 
-SEC_PIPELINE_DOWNLOAD_VERSION: Final[str] = "sec_pipeline_download_v1.2.0"
+SEC_PIPELINE_DOWNLOAD_VERSION: Final[str] = "sec_pipeline_download_v1.3.0"
 SEC_DOWNLOAD_SOURCE: Final[str] = "sec"
 _SEC_FORMS_ADAPTER_JOINER: Final[str] = ","
 _SEC_STATUS_DOWNLOADED: Final[str] = "downloaded"
@@ -951,7 +952,6 @@ class SecPipeline:
             start_date=start_date,
             end_date=end_date,
             overwrite=overwrite,
-            pipeline_download_version=SEC_PIPELINE_DOWNLOAD_VERSION,
             expand_form_aliases=expand_form_aliases,
             split_form_input=split_form_input,
             parse_date=parse_date,
@@ -1359,8 +1359,8 @@ class SecPipeline:
             return None
         if not has_current_download_version(previous_meta, SEC_PIPELINE_DOWNLOAD_VERSION):
             return None
-        previous_fingerprint = str(previous_meta.get("source_fingerprint", "")).strip()
-        return "already_downloaded_complete" if previous_fingerprint else None
+        previous_fingerprint = read_published_source_fingerprint(previous_meta)
+        return "already_downloaded_complete" if previous_fingerprint is not None else None
 
     def _can_skip(
         self,
@@ -1388,8 +1388,8 @@ class SecPipeline:
             return None
         if not has_current_download_version(previous_meta, SEC_PIPELINE_DOWNLOAD_VERSION):
             return None
-        previous_fingerprint = str(previous_meta.get("source_fingerprint", "")).strip()
-        if previous_fingerprint and previous_fingerprint == source_fingerprint:
+        previous_fingerprint = read_published_source_fingerprint(previous_meta)
+        if previous_fingerprint is not None and previous_fingerprint == source_fingerprint:
             return "source_fingerprint_matched"
         if _remote_files_equivalent_to_previous_meta(previous_meta=previous_meta, remote_files=remote_files):
             return "remote_files_equivalent"
