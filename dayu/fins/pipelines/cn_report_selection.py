@@ -243,6 +243,85 @@ _HK_CHINESE_DIGIT_TO_INT: Final[dict[str, int]] = {
     "八": 8,
     "九": 9,
 }
+# 只为能够完整解释的中文关系限定作用域；未识别的尾部不能被截掉。
+_HK_CHINESE_REPORT: Final[str] = r"(?:中期[報报]告|半年度[報报]告|半年[報报]|年度[報报]告|年[報报])"
+_HK_SCOPED_YEAR: Final[str] = r"(?:19\d{2}|20\d{2}|[零〇一二三四五六七八九]{4})年?"
+_HK_SCOPED_REVISION: Final[str] = r"(?:更正|修[訂订]|[補补]充)(?:[後后])?(?:版)?"
+_HK_SCOPED_REPORT: Final[re.Pattern[str]] = re.compile(
+    rf"(?:{_HK_SCOPED_REVISION})?"
+    rf"(?:{_HK_SCOPED_YEAR}|截至(?:19|20)\d{{2}}年\d{{1,2}}月\d{{1,2}}日止"
+    r"(?:(?:六[個个]月|年度)[之的]?)?)"
+    rf"{_HK_CHINESE_REPORT}"
+    rf"(?:{_HK_SCOPED_REVISION}|（{_HK_SCOPED_REVISION}）|\({_HK_SCOPED_REVISION}\))?"
+)
+_HK_SUPPLEMENT_RELATION: Final[re.Pattern[str]] = re.compile(
+    r"(?P<subject>.+)及有[關关](?P<reference>.+)的[補补]充[資资]料"
+)
+# 竞争主体共用同一词形，不随报告/业绩的前后顺序改变；季报告包含既有季度信号的简称。
+_HK_CHINESE_QUARTER: Final[str] = r"(?:第?[一二三四]季(?:度)?|季度)"
+_HK_CHINESE_PERIOD_SUBJECT: Final[str] = (
+    rf"(?:{_HK_CHINESE_REPORT}|{_HK_CHINESE_QUARTER}[報报]告|"
+    rf"(?:中期|全年|末期|{_HK_CHINESE_QUARTER})[業业][績绩]|[業业][績绩](?:公告|[報报]告))"
+)
+_HK_UNRESOLVED_RELATION: Final[re.Pattern[str]] = re.compile(
+    # 补充资料指向引用对象；悬空连接词没有对象。普通前置“有关”和非财期附件不是歧义证据。
+    rf"[補补]充[資资]料|[及與与和](?:有[關关])?$|"
+    # 连接词两侧都有明确财期主体才构成竞争，不以裸连接词拒绝普通附载资料。
+    rf"{_HK_CHINESE_PERIOD_SUBJECT}.*[及與与和].*{_HK_CHINESE_PERIOD_SUBJECT}"
+)
+
+
+def hk_report_subject_title(title: str) -> str | None:
+    """确定标题中唯一主体报告的语义文本，不改写原始来源。
+
+    参数：title 为完整来源标题。
+    返回：普通标题原文，或完整识别“主体及有关另一报告的补充资料”后的主体。
+        完整补充关系之外，去除空白后按以下有限词形检测竞争主体：
+        报告为中期报告、半年度报告、半年报、年度报告、年报；季度报告为季度词形加报告。
+        季度词形为可省略“第”的“一/二/三/四”加“季/季度”，或单独“季度”。
+        业绩为“中期/全年/末期”或季度词形加业绩，以及业绩公告、业绩报告；
+        “报、业、绩”各字支持简繁字符。连接关系仅为“及/與/与/和”，两侧命中上述词形时
+        不论顺序、是否同年同期间均返回 None；多个上述年报/中报词形也返回 None。
+        未支持词形或分隔符的复合标题不保证被识别为竞争主体，仍可能沿既有分类、年份等
+        约束确认，不能一律视为未知；例如无公告/报告后缀的年度/半年度/时长加业绩、
+        首季、阿拉伯数字季度词形或顿号组合。
+        已识别报告引用或补充关系但不能完整解释、悬空连接词及独立补充引用也返回 None。
+        普通前置“有关”或“及有关资料”没有第二财期主体或补充引用信号时保留完整原文，
+        继续交既有约束判断；“年度报告及补充资料”修饰对象不明，返回 None。
+    异常：无；完整关系隔离仅支持有明确年份或截止日的上述中文关系，不解释任意自然语言附件。
+    """
+    compact = re.sub(r"\s+", "", title)
+    relation = _HK_SUPPLEMENT_RELATION.fullmatch(compact)
+    if relation is not None:
+        subject, reference = relation.group("subject", "reference")
+        if all(
+            _HK_SCOPED_REPORT.fullmatch(part) is not None
+            and len(_hk_title_years(part)) == 1
+            and not has_unresolved_end_date(part)
+            for part in (subject, reference)
+        ):
+            # 同年同财期仍可能是在补充主体本身，不能宣称附属的是另一份报告。
+            if _hk_title_years(subject) == _hk_title_years(reference) and (
+                _classify_hk_period_projection(title=subject, category_text=subject)
+                == _classify_hk_period_projection(title=reference, category_text=reference)
+            ):
+                return None
+            return subject
+        return None
+    if _HK_UNRESOLVED_RELATION.search(compact) or len(re.findall(_HK_CHINESE_REPORT, compact)) > 1:
+        return None
+    return title
+
+
+def hk_report_end_date(title: str) -> date | None:
+    """只从唯一主体标题提取直接截止日，供候选、未决、年度与重解析共用。
+
+    参数：title 为完整来源标题。
+    返回：主体唯一有效截止日；主体不明或没有直接日期时返回 None。
+    异常：无，不从附属引用或披露日期补造报告日期。
+    """
+    subject = hk_report_subject_title(title)
+    return report_end_date(subject) if subject is not None else None
 
 
 def select_cninfo_report_candidates(
@@ -355,7 +434,7 @@ def select_hkexnews_report_candidates(
         )
         if facts is None:
             if _has_hk_unresolved_report_signal(title=item.title, category_text=item.category_text):
-                end = report_end_date(item.title)
+                end = hk_report_end_date(item.title)
                 uncertain.append(FinsDownloadUncertainReport(
                     source_id=item.document_id, filing_date=item.filing_date,
                     report_date=end.isoformat() if end is not None else None,
@@ -595,6 +674,10 @@ def resolve_hk_report_period(
     参数：title、category_text 为来源事实；annual_ends 为同公司年度截止日证据。
     返回：财年和身份/覆盖投影；缺少或冲突返回 None。异常：无。
     """
+    subject = hk_report_subject_title(title)
+    if subject is None:
+        return None
+    title = subject
     if has_unresolved_end_date(title):
         return None
     # 财年区间简写与普通日期不同；没有明确命名规则时不选择区间中的某一年。
@@ -835,32 +918,42 @@ def _pick_best_hk_announcement(items: list[HkexnewsRawAnnouncement]) -> Hkexnews
         最佳公告；空列表返回 `None`。
 
     Raises:
-        无。
+        ValueError: 已确认公告没有唯一主体时抛出。
     """
 
     if not items:
         return None
 
-    def sort_key(item: HkexnewsRawAnnouncement) -> tuple[int, str]:
-        return (1 if _is_hk_amended_title(item.title) else 0, item.filing_date)
+    return max(items, key=_hk_announcement_sort_key)
 
-    return max(items, key=sort_key)
+
+def _hk_announcement_sort_key(item: HkexnewsRawAnnouncement) -> tuple[bool, str]:
+    """以主体修订性质及披露日期为同财期公告选优。
+
+    参数：item 为已确认财期的 raw 公告。
+    返回：修订优先、日期次之的排序键。
+    异常：唯一主体不成立时抛 ValueError，拒绝用附属修订参与选优。
+    """
+    return _is_hk_amended_title(item.title), item.filing_date
 
 
 def _is_hk_amended_title(title: str) -> bool:
     """判断披露易标题是否为更正/修订版本。
 
     Args:
-        title: 公告标题。
+        title: 已确认财期公告的完整标题。
 
     Returns:
         是修订版本返回 `True`。
 
     Raises:
-        无。
+        ValueError: 唯一主体不成立。
     """
 
-    upper = title.upper()
+    subject = hk_report_subject_title(title)
+    if subject is None:
+        raise ValueError("已确认报告必须有唯一主体标题")
+    upper = subject.upper()
     return any(token.upper() in upper for token in _HK_TITLE_AMENDED_TOKENS)
 
 
@@ -879,10 +972,13 @@ def _is_english_hk_announcement(announcement: HkexnewsRawAnnouncement) -> bool:
 
     if announcement.language == "en":
         return True
-    if _looks_like_english_report_text(announcement.title):
+    subject = hk_report_subject_title(announcement.title)
+    # 无唯一主体的来源仍按原有语言门槛处理，不能借附属关系让英文来源准入。
+    title = subject if subject is not None else announcement.title
+    if _looks_like_english_report_text(title):
         return True
-    if not _contains_cjk(announcement.title) and _looks_like_english_report_text(
-        f"{announcement.title} {announcement.category_text}"
+    if not _contains_cjk(title) and _looks_like_english_report_text(
+        f"{title} {announcement.category_text}"
     ):
         return True
     return False
@@ -940,10 +1036,10 @@ def _build_hk_candidate(
         HKEXNews candidate。
 
     Raises:
-        无。
+        ValueError: 已确认公告没有唯一主体时抛出。
     """
 
-    end = report_end_date(announcement.title)
+    end = hk_report_end_date(announcement.title)
     return CnReportCandidate(
         provider="hkexnews",
         source_id=announcement.document_id,
@@ -987,7 +1083,9 @@ def _has_hk_unresolved_report_signal(*, title: str, category_text: str) -> bool:
     """
     if _hk_report_family(category_text) is None:
         return False
-    facts = title.upper()
+    subject = hk_report_subject_title(title)
+    # unknown 的资格只表示原文提到报告；主体不明时仍应保留可追溯未决。
+    facts = (subject if subject is not None else title).upper()
     return (
         _contains_any_token(facts, _HK_REPORT_FY_TOKENS + _HK_REPORT_H1_TOKENS + _HK_CATEGORY_RESULTS_MARKERS + _HK_QUARTER_LENGTH_TOKENS)
         or any(_contains_any_token(facts, tokens) for tokens in _HK_RESULTS_PERIOD_TOKENS.values())
@@ -1005,13 +1103,13 @@ def hk_annual_end_date(*, title: str, category_text: str) -> date | None:
     facts = resolve_hk_report_period(title=title, category_text=category_text, annual_ends=())
     if facts is None or facts[1].identity_period not in {"FY", "Q4"}:
         return None
-    return report_end_date(title)
+    return hk_report_end_date(title)
 
 
 def local_hk_annual_ends(entries: tuple[SourceMetaIntegrityReadEntry, ...]) -> dict[str, date]:
     """从同窗原始来源与完整性分类取得可信年度证据。
 
-    参数：entries 为同一稳定根严格读取的元数据与完整性观察。
+    参数：entries 为同一稳定根严格读取的元数据与完整性观察；可选分类缺失时只用主体标题。
     返回：可信同公司原始年度文档 ID 到直接截止日的映射。
     异常：必填来源文本缺失原样抛 KeyError；字段类型或文本非法抛 ValueError。"""
     result: dict[str, date] = {}
@@ -1033,8 +1131,8 @@ def local_hk_annual_ends(entries: tuple[SourceMetaIntegrityReadEntry, ...]) -> d
         category_value = meta.get("source_category")
         if category_value is not None and not isinstance(category_value, str):
             raise ValueError("HK source_category must be text or null")
-        category = category_value or title
-        if (end := hk_annual_end_date(title=title, category_text=category)) is not None:
+        category = category_value or hk_report_subject_title(title)
+        if category is not None and (end := hk_annual_end_date(title=title, category_text=category)) is not None:
             result[entry.document_id] = end
     return result
 

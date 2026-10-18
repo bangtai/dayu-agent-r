@@ -8,8 +8,10 @@ from dayu.fins.domain.document_models import FilingUpdateRequest, ProcessedUpdat
 from dayu.fins.domain.enums import SourceKind
 from dayu.fins.pipelines.cn_download_protocols import CnDownloadWorkflowHost
 from dayu.fins.pipelines.cn_form_utils import PeriodDownloadWindow
-from dayu.fins.pipelines.cn_report_selection import resolve_hk_report_period, local_hk_annual_ends
-from dayu.fins.pipelines.hk_fiscal_calendar import report_end_date, hk_report_date_source
+from dayu.fins.pipelines.cn_report_selection import (
+    resolve_hk_report_period, local_hk_annual_ends, hk_report_end_date, hk_report_subject_title,
+)
+from dayu.fins.pipelines.hk_fiscal_calendar import hk_report_date_source
 from dayu.fins.download_contract import FinsDownloadUncertainReport
 from dayu.fins.storage import SourceIntegrityStatus
 
@@ -56,12 +58,12 @@ def rebuild_hk_periods(
                 cancelled = True
                 break
             title = _required_meta_text(meta, "source_title")
-            # 老缓存未存分类时，只使用标题本身的 report/results 事实，不复用旧季度猜分类。
+            # 分类缺失时也只使用统一主体的 report/results 事实，不复用旧季度猜分类。
             raw_category = meta.get("source_category")
             if raw_category is not None and not isinstance(raw_category, str):
                 raise ValueError("source_category must be text or null")
-            category = raw_category or title
-            facts = resolve_hk_report_period(title=title, category_text=category, annual_ends=ends)
+            category = raw_category or hk_report_subject_title(title)
+            facts = resolve_hk_report_period(title=title, category_text=category, annual_ends=ends) if category is not None else None
             period = facts[1].identity_period if facts is not None else None
             filing_date = _required_meta_text(meta, "filing_date")
             if not any(
@@ -69,7 +71,7 @@ def rebuild_hk_periods(
                 for w in windows
             ):
                 continue
-            end = report_end_date(title)
+            end = hk_report_end_date(title)
             report_date = end.isoformat() if end is not None else None
             if facts is None:
                 uncertain.append(FinsDownloadUncertainReport(

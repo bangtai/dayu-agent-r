@@ -1,0 +1,34 @@
+{
+  "description": "官方完整分类原响应；无财期预注入。网络原件与合成边界/转换资产严格区分。",
+  "stock_code": "09633",
+  "captures": [
+    {
+      "retrieved_at": "2026-10-18T16:15:59.623541+00:00",
+      "url": "https://www1.hkexnews.hk/search/titleSearchServlet.do?lang=zh&category=0&market=SEHK&stockId=1000054238&searchType=1&documentType=-1&t1code=40000&t2Gcode=-2&t2code=40100&fromDate=20250101&toDate=20261019&MB-Daterange=0&sortByOptions=DateTime&sortDir=0&rowRange=100",
+      "status_code": 200,
+      "bytes": 1107,
+      "sha256": "34644b08de8df726fc4e405f4f4b2d36b90c819d4acad47b5e46ef0632dbe743",
+      "body_file": "http-03.body"
+    },
+    {
+      "retrieved_at": "2026-10-18T16:16:03.093453+00:00",
+      "url": "https://www1.hkexnews.hk/search/titleSearchServlet.do?lang=zh&category=0&market=SEHK&stockId=1000054238&searchType=1&documentType=-1&t1code=40000&t2Gcode=-2&t2code=40200&fromDate=20250101&toDate=20261019&MB-Daterange=0&sortByOptions=DateTime&sortDir=0&rowRange=100",
+      "status_code": 200,
+      "bytes": 1255,
+      "sha256": "dc5d569ceb4d2468e7675fe83a72f6391eae4a494072305ef581268df57c3b12",
+      "body_file": "http-04.body"
+    },
+    {
+      "retrieved_at": "2026-10-18T16:16:04.515660+00:00",
+      "url": "https://www1.hkexnews.hk/search/titleSearchServlet.do?lang=zh&category=0&market=SEHK&stockId=1000054238&searchType=1&documentType=-1&t1code=10000&t2Gcode=3&t2code=-2&fromDate=20250101&toDate=20261019&MB-Daterange=0&sortByOptions=DateTime&sortDir=0&rowRange=100",
+      "status_code": 200,
+      "bytes": 10917,
+      "sha256": "3d9896c01325bbffec3804ce7135f82a61e51f97bf65c1400af2fab2634c3c36",
+      "body_file": "http-05.body"
+    }
+  ],
+  "pdf": {
+    "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0924/2026092401878_c.pdf",
+    "sha256": "01725ee4d55c352e89fa83eaf1b3e62bc82d7b98be596e78cdde63c64a76637b"
+  }
+}
