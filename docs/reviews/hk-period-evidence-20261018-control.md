@@ -27,7 +27,7 @@
 
 ## Gate state
 
-- current gate / next entry point：必要提交 / push -> create draft PR -> 总控交付核对。
+- current gate / next entry point：final closeout pass；work unit completed。用户可审阅 draft PR 203 并自行决定 merge，未自动合并。closeout记录推送后的精确最终OID/完整diff收尾事实见 `workspace/tmp/hk-period-evidence-20261018/pr-203-final-delivery.json`。
 - plan 总控初核：gpt-6-sol runner 原生及外层退出 0，实际日志 `workspace/tmp/hk-period-plan-run-authorized.jsonl`；计划 `hk-period-evidence-20261018-plan.md` SHA256 `9bb2a20823c4a54ba22c1e13361e81ec2271f7463ac9781b4d6f12fdc4e02573`，直接根因为同一 owner 内 category-first 分类与年度家族准入不一致；接受单 slice、保持公共 schema/版本/窗口/未知关闭语义的边界。计划涉及可信年度证据准入与 unknown→confirmed，适用独立 Planreview，双路并行审核后裁决。基线 232 测试、全项目 pyright 通过仅支持未改代码版本，不作为改后验收。取证首次读锁失败及后续同命令批准执行均保留，不解释为财期根因。
 - 双路 planreview：mimo-flash `plan-review-20261018-221727.md`，ds-flash `plan-review-20261018-220929.md`；并发独立执行，均原生/外层退出 0、结论 pass-with-risks。原始日志 `workspace/tmp/hk-period-planreview-{mimo,ds}.jsonl`，stderr 的 unrecognized_model 原提示保留，不覆盖原生成功或业务判断。
 
@@ -97,3 +97,16 @@ gpt-6-sol planfix runner 原生/外层退出 0，日志 `workspace/tmp/hk-period
 - 分类：已接受的计划/code findings均已修复并经所需双路复审；日志行号finding rejected-with-reason；23未覆盖语句、真实base不故障注入和公开结果有界的适用性已在本轮验证/审核完成核对（fixed in current slice），不宣称穷尽。内部历史归档审计、复杂财年、未来真实比较年标题/来源异常的新需求assigned to later work unit，owner为相应Fins/storage；现行有歧义输入从严保留未决。TLS/沙箱/域名、调用方仍非目标。
 - docs decision已完成；issue关联/closeout comment不适用（本任务为workpaper报修，无GitHub issue身份，不创建新issue或评论）。main远端OID仍为原base；传统保护规则required_status_checks contexts/checks均为空，rules为空；仓库无CI workflow。PR创建后仍核对实际checks，不把“无CI”写成“CI通过”。
 - 决定：ready-to-open-draft-PR pass，自动执行必要提交/push与新draft PR，随后总控按精确head/base OID核对完整diff及最终远端状态。merge、approve、mark ready、request reviewers未授权。
+
+### 提交 / push / create draft PR
+
+- `.git/index.lock` 默认沙箱写限制导致首次stage/commit尝试失败，未产生提交；随后精确提权暂存已核对的21个文件并提交成功，未改权限或绕过保护。分支非protected trunk；base..HEAD仅本任务一提交 `6c2f857236aaeb72740de0e73e72d27187e915d0`，八产品文件与已审v2逐字相同。已成功push到现有github remote同名新分支。
+- 已创建新draft PR：<https://github.com/noho/dayu-agent-r/pull/203>，仓库 `noho/dayu-agent-r`，head `fix/hk-period-evidence-20261018`，base `main`。实际title/body以本轮准备的正文为准，没有issue引用、reviewer请求或merge动作。
+- 创建成功后进入总控交付核对，不把创建本身视为draft-PR-pass；后续取精确OID完整diff及checks/最终push事实留档。
+
+### 总控交付核对 / draft-PR-pass / final closeout
+
+- 已完成真实交付核对，记录 `workspace/tmp/hk-period-evidence-20261018/pr-203-initial-delivery.json`。repository/head repository均为 `noho/dayu-agent-r`；PR 203为OPEN/draft，初次head `6c2f857236aaeb72740de0e73e72d27187e915d0`、base `dbc9483df8a5cecfecc20cc61333eff0319e5982`。精确OID compare返回完整21文件diff，SHA `284ab1ec8f627f42079a653a4ca185fd3a5bb11cb3a1b538ab7443394c34d390`；API文件集合与本地OID diff完全相同，8产品文件从该head Git对象取回后逐件SHA与已审v2一致。
+- title/body与准备的最终正文一致；PR actual checks=[]，main传统保护required contexts/checks=[]，没有把未运行CI写成通过。remote分支指向该head，读取diff后再次核对head/base/draft均未变。必要提交/push及全部审核/验证/文档条件满足，故draft-PR-pass。
+- 已创建实质收尾总结 `hk-period-evidence-20261018-closeout.md`，列明改动、实际验证、README、findings状态、风险owner、PR、issue不适用和下一入口。此后提交/push仅包含本control和closeout治理记录，无产品变化；最终OID/完整diff、产品同版和push再次核对保存在 `pr-203-final-delivery.json`，不机械重开已完成的代码审核。
+- 最终状态：全部适用gates完成，work unit completed；所有accepted findings已修复且双路复审，无未解决blocker；本任务没有merge/approve/mark-ready/request-reviewers/issue-comment动作。完成通知对象为已核验的portfolio-manager协作助手，实际回执另存同证据目录。
