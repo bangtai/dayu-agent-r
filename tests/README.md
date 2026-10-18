@@ -40,6 +40,11 @@ spawn 覆盖率使用独占目录中的 coverage 配置，显式开启 `concurre
 F5 完整 owner 回归：`python -m pytest tests/fins/test_f5_result_contract.py tests/fins/test_f5_storage_calendar.py tests/fins/test_f5_workflow_rebuild.py -q`。
 使用真实隔离 Fs/staging、两个 publication rename barrier、严格 raw 原异常与 guard 释放、同公司可信年度/英文证据、366 天边界、官方冻结 Raw 正例与明确标记的合成未知报告。结果回归核对 A 发布+B 未知、240 字真实 ID、10/11 独立列表与 4096 预算、fresh schema、正常/取消双投影、收口失败保全、F6 优先、实际 adapter/observation/wait/CLI 同源及 normal→rebuild→overwrite 日期/来源（含旧 processed 非空值）时序。相关既有 downloader/workflow/runtime/store/CLI/wait 测试同步使用 mandatory 新签名和完整新 schema，未提供旧库兼容。
 官方 Raw 六件正式资产位于 `tests/fins/fixtures/hk_f5_official_raw/`：两份原响应 body、原 provenance envelope、原 owner 验证与采集结果均逐字验 SHA256，不依赖 ignored 临时采集目录。年度 1446 字节、季度 658 字节；官方正例不被称作未知反例。
+`test_hk_period_evidence.py` 使用 `fixtures/hk_period_evidence_20261018/` 的三份完整官方分类响应和
+原始 URL／采集时间／SHA256 provenance，验证年度供证与未决资格分离、组合末期业绩／股息边界、
+两个 Q1 的真实 Fs 发布／失败重试／幂等及同 v3 重解析。PDF 仅保留官方原件 provenance 引用，
+workflow 的 PDF／Docling 资产明确为合成；离线回归不替代真实下载和转换验收。
+年度准入反例验证财年区间、显式财年标签冲突及多年份歧义不供证，三个月来源仍未决且不请求 HEAD。
 窗口回归覆盖外窗远端年度不能改变未知或触发 HEAD、宽窗可以供证、可信本地年度在窄窗仍供证及英文年度/同 ID 冲突。真实 Fs job 写入、回读和原子成功入口拒绝 SUCCEEDED+未知，保留合法 FAILED/CANCELLED/真空成功、无未知正常 partial 和收口异常 typed 摘要；CLI 取消摘要保持 stderr 与退出码 130，无下载摘要保持原提示。
 CLI 下载引用回归覆盖确认文档 ID、未知来源引用与既有文档 ID 共用完整 JSON 字面量，特殊字符及 240 码点 Unicode 身份可逆且不产生额外行；真实 adapter/observation/wait/CLI 链继续核对已确认 A、未知 B、原计数、失败/取消通道与退出码，并保留 wait JSON 原引用。
 

@@ -554,6 +554,13 @@ batching repository 是 begin / commit / rollback 的唯一 lifecycle owner。pr
 
 CNInfo / HKEXNews downloader 只负责 HTTP 请求响应、provider JSON 解析、provider raw 字段归一、股票代码匹配、PDF URL 归一、HEAD / GET 与 PDF 字节校验。产品级财报候选语义由 `dayu.fins.pipelines.cn_report_selection` 持有：title blocklist、语言过滤、report kind / fiscal period / fiscal year 推断、同 period/year 去重、amended 优先和 `CnReportCandidate` 构造都在 pipeline helper 内完成。HKEXNews 的 Q1～Q4 共用一次全 results group discovery；selection 先只由 provider category 判定 report/results family，再在该 family 内共同解释 category 与 title 的期间事实。category family 或期间事实不唯一、同一 source ID 的核心事实冲突时失败关闭。
 
+HK 年度日期证据与未决投影共享上述基础家族和期间分类，但资格不同：已确认 FY/Q4 投影且原标题
+有唯一明确截止日的来源可供年度日期，不再要求命中未决标题信号；官方末期业绩与股息组合亦遵循
+该规则，年度来源还须通过与主候选相同的财年歧义和标签冲突校验，缺日或中期／期间冲突不供证。
+Q4 的 FY coverage 不把公告变成完整年报。远端同窗公告、
+本地同公司 COMPLETE 下载来源及 rebuild 复用同一年度准入，沿用邻近日历和冲突关闭规则。
+无法解期时仍须已有报告标题信号才进入未决集合；只有 results 分类而无该信号的不可解来源保持忽略。
+
 CNInfo FY 的财年和全文／摘要事实由纯 PDF 首页 facts owner 产生；selection 只消费已确认事实，
 明确标题摘要不取原文，隐藏摘要确认后排除。任意准入年度原文的获取或解析失败终止整次 discovery，
 不返回部分财期候选。H1/Q 和 HK 的财期推断保持既有规则。CNInfo 同财年、财期内仍先按修订、

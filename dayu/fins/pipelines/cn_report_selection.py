@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from datetime import date
 from collections.abc import Callable, Mapping
-from typing import Final, Optional, TypeAlias
+from typing import Final, Literal, Optional, TypeAlias
 
 from dayu.fins.pipelines.cn_download_models import (
     CN_FISCAL_PERIOD_ORDER,
@@ -354,7 +354,7 @@ def select_hkexnews_report_candidates(
             annual_ends=annual_ends,
         )
         if facts is None:
-            if is_hk_report_family(title=item.title, category_text=item.category_text):
+            if _has_hk_unresolved_report_signal(title=item.title, category_text=item.category_text):
                 end = report_end_date(item.title)
                 uncertain.append(FinsDownloadUncertainReport(
                     source_id=item.document_id, filing_date=item.filing_date,
@@ -669,15 +669,11 @@ def _classify_hk_period_projection(
 
     if has_unresolved_end_date(title):
         return None
-    normalized_category = category_text.strip().upper()
-    if not normalized_category:
-        return None
-    is_results = _contains_any_token(normalized_category, _HK_CATEGORY_RESULTS_MARKERS)
-    is_report = _contains_any_token(normalized_category, _HK_CATEGORY_REPORT_MARKERS)
-    if is_results == is_report:
+    family = _hk_report_family(category_text)
+    if family is None:
         return None
     normalized_material_facts = f"{category_text} {title}".upper()
-    if is_report:
+    if family == "report":
         has_h1 = _contains_any_token(normalized_material_facts, _HK_REPORT_H1_TOKENS)
         facts_without_h1_phrases = _remove_tokens(normalized_material_facts, _HK_REPORT_H1_TOKENS)
         has_fy = _contains_any_token(facts_without_h1_phrases, _HK_REPORT_FY_TOKENS)
@@ -967,16 +963,29 @@ def _build_hk_candidate(
     )
 
 
-def is_hk_report_family(*, title: str, category_text: str) -> bool:
-    """判断原始标题和分类是否属于已支持财报家族。
+def _hk_report_family(category_text: str) -> Literal["report", "results"] | None:
+    """只从官方分类确定唯一财报家族，供期间分类和未决资格共同使用。
 
-    参数：title 为原标题；category_text 为来源原分类。
-    返回：是否存在财报家族事实，不解析财年或财期。
-    异常：无。"""
+    参数：category_text 为来源原分类，不用标题信号否决已知分类。
+    返回：唯一报告或业绩家族；缺失或冲突时返回 None。
+    异常：无。
+    """
     category = category_text.upper()
     results = _contains_any_token(category, _HK_CATEGORY_RESULTS_MARKERS)
     report = _contains_any_token(category, _HK_CATEGORY_REPORT_MARKERS)
     if results == report:
+        return None
+    return "results" if results else "report"
+
+
+def _has_hk_unresolved_report_signal(*, title: str, category_text: str) -> bool:
+    """判断无法解期的来源是否已有报告标题信号，应投影为未决。
+
+    参数：title 为原标题；category_text 为来源原分类。
+    返回：属于唯一财报家族且命中既有标题信号时为 True，不代表期间已确认。
+    异常：无。
+    """
+    if _hk_report_family(category_text) is None:
         return False
     facts = title.upper()
     return (
@@ -989,12 +998,12 @@ def hk_annual_end_date(*, title: str, category_text: str) -> date | None:
     """提取原始年度报告或全年业绩的直接截止日。
 
     参数：title 为原标题；category_text 为来源原分类。
-    返回：FY/全年 Q4 的直接截止日；没有唯一年度事实时为 None。
+    返回：财年与期间无歧义的 FY/全年 Q4 直接截止日；没有唯一年度事实时为 None。
     异常：无，不按语言排除可信年度证据。"""
-    if not is_hk_report_family(title=title, category_text=category_text):
-        return None
-    projection = _classify_hk_period_projection(title=title, category_text=category_text)
-    if projection is None or projection.identity_period not in {"FY", "Q4"}:
+    # 年度源独立通过统一解析的完整歧义校验，不向外部或自身借用年度证据。
+    # 未决标题资格不参与供证，不能否决已确认的官方末期业绩事实。
+    facts = resolve_hk_report_period(title=title, category_text=category_text, annual_ends=())
+    if facts is None or facts[1].identity_period not in {"FY", "Q4"}:
         return None
     return report_end_date(title)
 
