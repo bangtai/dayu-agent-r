@@ -2,7 +2,7 @@
 
 ## Goal confirmation（已确认）
 
-任务依据：`/Users/leo/workspace/portfolio-manager-v2/orch/workpapers/hk-g0-seed-20261018/dayu-9633-task.md`；已读取《新Agent开始范式编排.md》上游报修第 39–48 行。当前 gate / next entry point：ready-to-open-draft-PR / 必要提交与 push。下文按时间保留各gate历史记录，以本行及末节为当前状态。
+任务依据：`/Users/leo/workspace/portfolio-manager-v2/orch/workpapers/hk-g0-seed-20261018/dayu-9633-task.md`；已读取《新Agent开始范式编排.md》上游报修第 39–48 行。当前 gate / next entry point：final closeout；产品交付核对及 draft-PR-pass 已完成，收尾记录随治理提交推送后复核最终 head。下文按时间保留各gate历史记录，以本行及末节为当前状态。
 
 确认回执：portfolio-manager 通过同一会话回复已完整读取本文，明确确认目标、非目标、owner 边界与成功信号；固定入口/参数、新日志、原失败及七份资产身份保留、测试/pyright、双路审核及入口版本核验均确认。协调方无其它同 source 或已知同根因交派，不排除未知全局重复；允许从 705c2dc2 起步，依赖 PR203 时以其分支为 base 仅交独立 delta，不 merge、不重复纳入旧改动。现授权进入 plan，指定 gpt-6-sol runner 与 mimo-flash/ds-flash 并发 review；无周期 timer。
 
@@ -177,3 +177,17 @@ DS两项低严重度文档精度建议逐项裁决：
 MiMo关于952文件中“其余949”与root更新control的表述不用于计数断言：writer完成时949其它文件不变；root追加control后为948其它文件不变+1治理文件变化。manifest历史control指纹保留且root核收前已逐项验证，不视作产品漂移。
 
 结论：完整code review及实际fix/受影响复审全部完成，accepted findings均已修复，未解决needs-more-evidence或blocking question为空；残余风险按前述owner/destination分类。当前版139/pyright与固定增量、可取回625/730及首次转换证据适用，mandatory checks满足。README决策完成。current gate / next entry point = ready-to-open-draft-PR / 必要提交与push；仅9633 delta，以PR203分支为base，不纳0135control，不merge。
+
+
+## Draft PR 创建 / 总控交付核对入口
+
+已按清单只提交25个9633文件，commit `58f53438fc77974c88a59a1c851d6acd0933b03c` 并push。draft PR204：https://github.com/noho/dayu-agent-r/pull/204 ，base=`fix/hk-period-evidence-20261018`；未修改PR203。0135control仍为独立untracked，未纳入commit。当前gate / next entry point = 总控交付核对，需核远端精确head/base、完整diff、已审源码对应、title/body、必要CI与最终push，不提前认定draft-PR-pass。
+
+
+## 总控交付核对 / draft-PR-pass
+
+PR204 repository/head repository均为`noho/dayu-agent-r`，OPEN draft；base分支`fix/hk-period-evidence-20261018`，OID `705c2dc2f6b4491edda0c6f0d2a4b1f8e2bf458d`；已push产品head `58f53438fc77974c88a59a1c851d6acd0933b03c`。完整远端diff与本地同OID对逐行相同，只有GitHub省略两处hunk标题函数上下文（raw严格相等探针失败已保留，规范化只去hunk标题上下文，不忽略文件/代码行差异）。25个文件全部属于9633清单；9产品文件与最终已审快照SHA逐一相同，未重复PR203变更，0135control排除。title/body真实匹配当前范围与验证复用/延期说明。
+
+固定入口提交后核验`delivery-entry-committed-01.json`：177文件与最终真实CLI轮完全相等，所有Dayu导入文件与该commit blob一致；CLI最后真实执行时HEAD仍705c、源码为未提交的最终SHA，不能冒称它当时运行于后来的提交，但当前commit承载同一完整源码。base规则为空且分支未保护，无required checks；head check-runs/statuses/PR rollup均空，仓库无CI workflows，不虚称云端CI执行通过。真实测试/pyright仍按前述日志。
+
+可取回交付资料位于`workspace/tmp/hk-9633-period-20261019/delivery-*`，核对汇总`delivery-audit-01.json`。全部产品成果已提交push，产品未变、必要审核/验证完成，进入draft-PR-pass，继而final closeout；收尾记录见`hk-9633-period-20261019-closeout.md`，治理记录提交push后再核最终head/base及产品未变，不重做已审相同内容。
