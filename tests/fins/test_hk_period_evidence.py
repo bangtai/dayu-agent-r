@@ -99,8 +99,8 @@ def test_official_annual_dates_confirm_both_q1_without_title_gate(
     for source_id, end in annuals.items():
         raw = by_id[source_id]
         facts = resolve_hk_report_period(title=raw.title, category_text=raw.category_text, annual_ends=(end,))
-        assert facts is not None and facts[0] == end.year
-        assert facts[1].identity_period == "Q4" and facts[1].covered_periods == ("FY", "Q4")
+        assert facts is not None and facts.fiscal_year == end.year
+        assert facts.projection.identity_period == "Q4" and facts.projection.covered_periods == ("FY", "Q4")
     quarters = tuple(by_id[source_id] for source_id in _QUARTER_YEARS)
     unknown = select_hkexnews_report_candidates(
         query=_QUERY, announcements=quarters, local_annual_ends=(), read_head_meta=_no_head,
@@ -156,8 +156,8 @@ def test_annual_and_unresolved_qualifications_share_family_without_expanding_unk
     assert bool(result.uncertain_reports) is uncertain
     if annual_end is not None:
         facts = resolve_hk_report_period(title=title, category_text=category, annual_ends=(annual_end,))
-        assert facts is not None and facts[1].identity_period == "Q4"
-        assert facts[1].covered_periods == ("FY", "Q4")
+        assert facts is not None and facts.projection.identity_period == "Q4"
+        assert facts.projection.covered_periods == ("FY", "Q4")
 
 
 @pytest.mark.parametrize("title", (
@@ -248,7 +248,7 @@ def test_real_fs_local_annual_q1_publication_retry_and_idempotency(
     assert seeded["uncertain_reports"] == []
     annual_entries = pipeline.source_repository.read_source_meta_integrity_view("0388", SourceKind.FILING, batch=None)
     assert len(annual_entries) == 2
-    assert set(local_hk_annual_ends(annual_entries).values()) == set(_ANNUAL_ENDS.values())
+    assert {anchor.end for anchor in local_hk_annual_ends(annual_entries).values()} == set(_ANNUAL_ENDS.values())
     for entry in annual_entries:
         for patch in ({"is_deleted": True}, {"ticker": "0005"}, {"company_id": "HKEX:foreign"},
                       {"source_provider": "cninfo"}, {"ingest_method": "upload"}):

@@ -5,10 +5,10 @@ from __future__ import annotations
 import calendar
 import re
 from datetime import date
-from typing import Literal
+from typing import Literal, TypeAlias
 
 _ANNUAL_NEIGHBOR_DAYS = 366
-_REPORT_DATE_SOURCE: Literal["source_title"] = "source_title"
+HkReportDateSource: TypeAlias = Literal["source_title", "source_document"] | None
 
 _DIGITS = dict(zip("零〇一二三四五六七八九", "00123456789", strict=True))
 _MONTHS = (
@@ -127,10 +127,11 @@ def relevant_annual_end_dates(end: date, annual_ends: tuple[date, ...]) -> tuple
     return tuple(sorted({d for d in annual_ends if abs((d - end).days) <= _ANNUAL_NEIGHBOR_DAYS}))
 
 
-def hk_report_date_source(report_date: str | None) -> Literal["source_title"] | None:
-    """将标题已解析日期投影为同源日期来源。
+def hk_report_date_source(source: HkReportDateSource) -> HkReportDateSource:
+    """投影 resolver 明确给出的来源。
 
-    参数：report_date 为本模块已解析的 ISO 日期或 None，不重新解析。
-    返回：有日期时为 source_title，无日期时为 None。
-    异常：无。"""
-    return _REPORT_DATE_SOURCE if report_date is not None else None
+    参数：source 为已确认的日期来源。返回：同源值。异常：ValueError 为非法来源。
+    """
+    if source not in (None, "source_title", "source_document"):
+        raise ValueError("HK report date source 非法")
+    return source

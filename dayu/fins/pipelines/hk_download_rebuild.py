@@ -9,13 +9,19 @@ from dayu.fins.domain.enums import SourceKind
 from dayu.fins.pipelines.cn_download_protocols import CnDownloadWorkflowHost
 from dayu.fins.pipelines.cn_form_utils import PeriodDownloadWindow
 from dayu.fins.pipelines.cn_report_selection import (
-    resolve_hk_report_period, local_hk_annual_ends, hk_report_end_date, hk_report_subject_title,
+    HkBodyPeriodPartial, resolve_hk_body_period_state, resolve_hk_report_period,
+    local_hk_annual_ends, hk_report_end_date, hk_report_subject_title,
 )
 from dayu.fins.pipelines.hk_fiscal_calendar import hk_report_date_source
+from dayu.fins.pipelines.hk_body_local_source import read_local_hk_body_pdfs, local_hk_body_evidence
+from dayu.fins.pipelines.cn_download_models import CnDownloadCancelledError, HkPeriodResolution
+from dayu.fins.storage.source_integrity import SourceIntegrityRevisionConflictError
+from functools import partial
 from dayu.fins.download_contract import FinsDownloadUncertainReport
 from dayu.fins.storage import SourceIntegrityStatus
 
 _PERIOD_VERSION = "hk-period-v3"
+_BODY_PERIOD_VERSION = "hk-period-body-v1"
 
 
 def rebuild_hk_periods(
@@ -33,6 +39,13 @@ def rebuild_hk_periods(
     """
     if cancel_checker is not None and cancel_checker():
         return [], (), True
+    checkpoint = partial(_body_cancel_checkpoint, cancel_checker)
+    try:
+        pdfs = read_local_hk_body_pdfs(ticker, host.source_repository, checkpoint)
+        body_facts = local_hk_body_evidence(ticker, pdfs, checkpoint)
+    except CnDownloadCancelledError:
+        return [], (), True
+    bodies = {e.publication.document_id: e for e in body_facts if e.publication is not None}
     batch = host.batching_repository.begin_batch(ticker)
     filings: list[dict[str, JsonValue]] = []
     uncertain: list[FinsDownloadUncertainReport] = []
@@ -44,8 +57,13 @@ def rebuild_hk_periods(
         if cancel_checker is not None and cancel_checker():
             host.batching_repository.rollback_batch(batch)
             return [], (), True
-        anchors = local_hk_annual_ends(entries)
-        ends = tuple(sorted(set(anchors.values())))
+        for pdf in pdfs:
+            entry = next((e for e in entries if e.document_id == pdf.publication.document_id), None)
+            if entry is None or entry.integrity.revision != pdf.publication.revision or entry.integrity.status is not SourceIntegrityStatus.COMPLETE:
+                raise SourceIntegrityRevisionConflictError()
+        anchors = local_hk_annual_ends(entries, body_facts)
+        annual_anchors = tuple(anchors.values())
+        ends = tuple(sorted({anchor.end for anchor in annual_anchors}))
         sources = {
             entry.document_id: entry for entry in entries
             if entry.source_meta.get("source_provider") == "hkexnews"
@@ -63,26 +81,36 @@ def rebuild_hk_periods(
             if raw_category is not None and not isinstance(raw_category, str):
                 raise ValueError("source_category must be text or null")
             category = raw_category or hk_report_subject_title(title)
-            facts = resolve_hk_report_period(title=title, category_text=category, annual_ends=ends) if category is not None else None
-            period = facts[1].identity_period if facts is not None else None
+            body_source = meta.get("report_date_source") == "source_document"
+            evidence = bodies.get(document_id)
+            outcome = (resolve_hk_body_period_state(title, category, ends, evidence, annual_anchors)
+                if category is not None and body_source and evidence is not None else
+                resolve_hk_report_period(title=title, category_text=category, annual_ends=ends)
+                if category is not None and not body_source else None)
+            facts = outcome if isinstance(outcome, HkPeriodResolution) else None
+            period = facts.projection.identity_period if facts is not None else None
             filing_date = _required_meta_text(meta, "filing_date")
             if not any(
                 w.fiscal_period in (meta.get("fiscal_period"), period) and w.start_date <= filing_date <= w.end_date
                 for w in windows
             ):
                 continue
-            end = hk_report_end_date(title)
-            report_date = end.isoformat() if end is not None else None
+            end = hk_report_end_date(title) if not body_source else None
+            report_date = facts.report_date if facts is not None else (
+                outcome.report_date.isoformat() if isinstance(outcome, HkBodyPeriodPartial) and outcome.report_date is not None
+                else end.isoformat() if end is not None else None)
             if facts is None:
                 uncertain.append(FinsDownloadUncertainReport(
                     source_id=_required_meta_text(meta, "source_id"), filing_date=filing_date,
                     report_date=report_date, existing_document_id=document_id, reason_category="uncertain_hk_period",
                 ))
                 continue
-            year, projection = facts
+            year, projection = facts.fiscal_year, facts.projection
             result: dict[str, JsonValue] = {
                 "document_id": document_id, "internal_document_id": meta["internal_document_id"],
                 "form_type": projection.identity_period, "filing_date": filing_date, "report_date": report_date,
+                "report_date_source": facts.report_date_source,
+                "fiscal_year": year, "fiscal_year_source": facts.fiscal_year_source,
                 "covered_fiscal_periods": list(projection.covered_periods),
                 "status": "failed", "downloaded_files": 0, "skipped_files": 0,
                 "failed_files": [], "has_xbrl": False, "rebuild": True,
@@ -99,15 +127,17 @@ def rebuild_hk_periods(
                 "fiscal_year": year,
                 "covered_fiscal_periods": list(projection.covered_periods),
                 "report_date": report_date,
-                "fiscal_year_source": "source_title_and_annual_end",
-                "report_date_source": hk_report_date_source(report_date),
-                "period_resolution_version": _PERIOD_VERSION,
+                "fiscal_year_source": facts.fiscal_year_source if body_source else "source_title_and_annual_end",
+                "report_date_source": hk_report_date_source(facts.report_date_source),
+                "period_resolution_version": _BODY_PERIOD_VERSION if body_source else _PERIOD_VERSION,
                 "period_resolution_sources": [doc for doc in sorted(anchors)],
             }
             result.update(
                 form_type=projection.identity_period,
                 covered_fiscal_periods=list(projection.covered_periods),
                 report_date=updates["report_date"],
+                report_date_source=updates["report_date_source"],
+                fiscal_year_source=updates["fiscal_year_source"],
                 status="skipped",
             )
             if all(meta.get(key) == value for key, value in updates.items()):
@@ -182,3 +212,9 @@ def _required_meta_text(meta: Mapping[str, JsonValue], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"HK source {key} must be non-empty text")
     return value
+
+
+def _body_cancel_checkpoint(cancel_checker: Callable[[], bool] | None) -> None:
+    """传递重建取消。参数：cancel_checker为Host观察。返回：无。异常：命中时CancelledError。"""
+    if cancel_checker is not None and cancel_checker():
+        raise CnDownloadCancelledError()

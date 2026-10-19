@@ -7,7 +7,10 @@ overwrite ticker 级清理、单 filing 阶段机调度和 summary 聚合。单�
 
 from __future__ import annotations
 
+import asyncio
+
 import time
+from threading import Event
 from datetime import date
 from dataclasses import dataclass
 from collections.abc import AsyncIterator, Callable
@@ -17,6 +20,8 @@ from typing import TypeAlias, cast
 from dayu.contracts.json_value import JsonValue
 from dayu.fins.domain.enums import SourceKind
 from dayu.fins.download_contract import FinsDownloadSource, FinsDownloadUncertainReport, validate_download_uncertain_reports
+from dayu.fins.pipelines.hk_body_local_source import read_local_hk_body_pdfs, local_hk_body_evidence
+from dayu.fins.pipelines.cn_download_owned_task import await_owned_task
 from dayu.fins.pipelines.cn_report_selection import local_hk_annual_ends
 from dayu.fins.pipelines.cn_download_company_meta import stage_company_meta_for_cn_download
 from dayu.fins.pipelines.cn_download_filing_workflow import (
@@ -32,16 +37,18 @@ from dayu.fins.pipelines.cn_download_models import (
     CN_DOWNLOAD_TERMINAL_OK,
     CnDownloadCancelledError,
     CnDownloadTerminalStatus,
-    CnAnnualReportPdf,
-    CnAnnualReportPublication,
+    CnReportPdf, HkAnnualAnchor, HkBodyEvidence,
+    CnReportPublication,
     CnCompanyProfile,
     CnFiscalPeriod,
     CnMarketKind,
     CnReportCandidate,
+    CnReportDiscoveryResult,
     CnReportQuery,
     CnSourceProvider,
 )
 from dayu.fins.pipelines.cn_download_rebuild import rebuild_cn_download_artifacts
+from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol
 from dayu.fins.pipelines.cn_download_protocols import (
     CnDownloadWorkflowHost,
     CnReportDiscoveryClientProtocol,
@@ -63,7 +70,7 @@ from dayu.fins.storage import (
 )
 from dayu.fins.storage import SourceDocumentRepositoryProtocol, SourceIntegrityStatus
 from dayu.fins.storage.source_integrity import validate_source_integrity_inventory
-from dayu.fins.pipelines.cn_annual_report_source import read_cn_annual_report_pdf, CnAnnualReportSourceError
+from dayu.fins.pipelines.report_original_source import read_report_pdf, ReportOriginalSourceError
 from dayu.fins.pipelines.cn_annual_report_diagnostics import log_cn_annual_report_rejection
 from dayu.fins.download_contract import FinsDownloadProviderError, FinsDownloadTransportCategory
 from dayu.fins._log import Log
@@ -265,14 +272,15 @@ async def run_cn_download_stream_impl(
     try:
         _raise_if_cancelled(module=module, ticker=normalized_ticker, document_id="", cancel_checker=cancel_checker)
         local_ends = ()
-        local_pdfs: tuple[CnAnnualReportPdf, ...] = ()
+        local_pdfs: tuple[CnReportPdf, ...] = ()
+        local_body_evidence: tuple[HkBodyEvidence, ...] = ()
         if market == "CN" and "FY" in period_policy.discovery_periods:
             validate_source_integrity_inventory(host.source_repository.list_source_integrity(normalized_ticker))
             _raise_if_cancelled(module=module, ticker=normalized_ticker, document_id="", cancel_checker=cancel_checker)
-            local_pdfs = _read_local_cn_annual_pdfs(normalized_ticker, period_windows, host.source_repository, cancellation_checkpoint)
+            local_pdfs = _read_local_report_pdfs(normalized_ticker, period_windows, host.source_repository, cancellation_checkpoint)
         if market == "HK":
-            entries = host.source_repository.read_source_meta_integrity_view(normalized_ticker, SourceKind.FILING, batch=None)
-            local_ends = tuple(sorted(set(local_hk_annual_ends(entries).values())))
+            local_pdfs, local_ends, local_body_evidence = await _load_local_hk_inputs(
+                normalized_ticker, host.source_repository, cancellation_checkpoint)
             _raise_if_cancelled(module=module, ticker=normalized_ticker, document_id="", cancel_checker=cancel_checker)
         profile = discovery.resolve_company(query)
         _raise_if_cancelled(module=module, ticker=normalized_ticker, document_id="", cancel_checker=cancel_checker)
@@ -288,11 +296,12 @@ async def run_cn_download_stream_impl(
             ticker=normalized_ticker,
             payload=company_info,
         )
-        discovery_result = discovery.list_report_candidates(
+        discovery_result = await _discover_reports(discovery,
             query,
             profile,
             local_annual_ends=local_ends,
-            local_cn_annual_pdfs=local_pdfs,
+            local_report_pdfs=local_pdfs,
+            local_body_evidence=local_body_evidence,
             pdf_download_gate=host.pdf_download_gate,
             cancellation_checkpoint=cancellation_checkpoint,
         )
@@ -398,7 +407,8 @@ async def run_cn_download_stream_impl(
                     profile=profile,
                     candidate=candidate,
                     prepared_asset=next((a for a in discovery_result.prepared_assets if (a.candidate.provider, a.candidate.source_id) == (candidate.provider, candidate.source_id)), None),
-                    local_annual_publication=next((w for w in discovery_result.local_annual_publications if (w.provider, w.source_id) == (candidate.provider, candidate.source_id)), None),
+                    local_publication=next((w for w in discovery_result.local_publications if (w.publication.provider, w.publication.source_id) == (candidate.provider, candidate.source_id)), None),
+                    body_selection=next((b for b in discovery_result.body_evidence if b.evidence.source_id == candidate.source_id), None),
                     overwrite=overwrite,
                     cancel_checker=cancel_checker,
                     module=module,
@@ -889,7 +899,9 @@ def _build_candidate_failed_result(
         "form_type": candidate.period_projection.identity_period,
         "filing_date": candidate.filing_date,
         "report_date": candidate.report_date,
+        "report_date_source": candidate.report_date_source,
         "fiscal_year": candidate.fiscal_year,
+        "fiscal_year_source": candidate.fiscal_year_source,
         "fiscal_period": candidate.period_projection.identity_period,
         "covered_fiscal_periods": list(candidate.period_projection.covered_periods),
         "downloaded_files": 0,
@@ -1137,12 +1149,12 @@ def _local_annual_checkpoint(checkpoint: Callable[[], None] | None) -> None:
         checkpoint()
 
 
-def _read_local_cn_annual_pdfs(
+def _read_local_report_pdfs(
     ticker: str,
     period_windows: tuple[PeriodDownloadWindow, ...],
     source_repository: SourceDocumentRepositoryProtocol,
     cancellation_checkpoint: Callable[[], None] | None,
-) -> tuple[CnAnnualReportPdf, ...]:
+) -> tuple[CnReportPdf, ...]:
     """仅预读 FY 窗内完整下载来源；不按 metadata 财年推断事实。
 
     参数：ticker、period_windows 为请求；source_repository 为仓储；cancellation_checkpoint 为控制点。
@@ -1155,7 +1167,7 @@ def _read_local_cn_annual_pdfs(
     entries = source_repository.read_source_meta_integrity_view(ticker, SourceKind.FILING, batch=None)
     _local_annual_checkpoint(cancellation_checkpoint)
     validate_source_integrity_inventory(tuple(e.integrity for e in entries))
-    inputs: list[CnAnnualReportPdf] = []
+    inputs: list[CnReportPdf] = []
     for entry in entries:
         meta = entry.source_meta
         if entry.integrity.status is not SourceIntegrityStatus.COMPLETE:
@@ -1174,10 +1186,10 @@ def _read_local_cn_annual_pdfs(
         revision = entry.integrity.revision
         if revision is None:
             raise SourceIntegrityRevisionConflictError()
-        publication = CnAnnualReportPublication("cninfo", source_id, entry.document_id, revision)
+        publication = CnReportPublication("cninfo", source_id, entry.document_id, revision)
         try:
-            pdf = read_cn_annual_report_pdf(ticker, entry.document_id, publication, meta, source_repository, cancellation_checkpoint)
-        except CnAnnualReportSourceError as exc:
+            pdf = read_report_pdf(ticker, entry.document_id, publication, meta, source_repository, cancellation_checkpoint)
+        except ReportOriginalSourceError as exc:
             log_cn_annual_report_rejection(source_id=source_id, stage="local_declaration_read",
                                            reason=exc.reason, document_id=entry.document_id)
             raise FinsDownloadProviderError(source=FinsDownloadSource.CNINFO, transport_category=FinsDownloadTransportCategory.PROTOCOL,
@@ -1186,3 +1198,75 @@ def _read_local_cn_annual_pdfs(
     if len({(pdf.publication.provider, pdf.publication.source_id) for pdf in inputs}) != len(inputs):
         raise ValueError("本地年度来源重复")
     return tuple(inputs)
+
+
+
+@dataclass(frozen=True, slots=True)
+class _DiscoveryCheckpoint:
+    """发现线程同时观察Host控制点与所属异步任务取消。"""
+
+    stopped: Event
+    checkpoint: Callable[[], None] | None
+
+    def __call__(self) -> None:
+        """检查取消。参数：无。返回：无。异常：取消原样传播。"""
+        if self.stopped.is_set():
+            raise CnDownloadCancelledError("发现任务已取消")
+        if self.checkpoint is not None:
+            self.checkpoint()
+
+
+async def _discover_reports(
+    discovery: CnReportDiscoveryClientProtocol, query: CnReportQuery, profile: CnCompanyProfile, *,
+    local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...],
+    local_body_evidence: tuple[HkBodyEvidence, ...],
+    pdf_download_gate: CnDownloadPdfGateProtocol, cancellation_checkpoint: Callable[[], None] | None,
+) -> CnReportDiscoveryResult:
+    """运行同步发现并在Task取消后等待线程及其提取worker收口。
+
+    参数：provider、查询、profile和原件/年度输入；gate和checkpoint为已有治理入口。
+    返回：已校验发现结果。异常：原错误透传；Task取消先通知线程并等待回收后原样传播。
+    """
+    stopped = Event()
+    checkpoint = _DiscoveryCheckpoint(stopped, cancellation_checkpoint)
+    checkpoint()
+    task = asyncio.create_task(asyncio.to_thread(discovery.list_report_candidates, query, profile,
+        local_annual_ends=local_annual_ends, local_report_pdfs=local_report_pdfs,
+        local_body_evidence=local_body_evidence,
+        pdf_download_gate=pdf_download_gate, cancellation_checkpoint=checkpoint))
+    result = await await_owned_task(task, stopped)
+    checkpoint()
+    return result
+
+
+def _read_local_hk_inputs(
+    ticker: str, repository: SourceDocumentRepositoryProtocol, checkpoint: Callable[[], None] | None,
+) -> tuple[tuple[CnReportPdf, ...], tuple[HkAnnualAnchor, ...], tuple[HkBodyEvidence, ...]]:
+    """在线程内读取并提取本地正文一次。
+
+    参数：ticker 为规范公司，repository 为原件仓储，checkpoint 为线程取消观察。
+    返回：同次原件与可信年度日期。异常：仓储、提取或取消原样透传。
+    """
+    entries = repository.read_source_meta_integrity_view(ticker, SourceKind.FILING, batch=None)
+    pdfs = read_local_hk_body_pdfs(ticker, repository, checkpoint)
+    evidence = local_hk_body_evidence(ticker, pdfs, checkpoint)
+    if checkpoint is not None:
+        checkpoint()
+    return pdfs, tuple(local_hk_annual_ends(entries, evidence).values()), evidence
+
+
+async def _load_local_hk_inputs(
+    ticker: str, repository: SourceDocumentRepositoryProtocol, checkpoint: Callable[[], None] | None,
+) -> tuple[tuple[CnReportPdf, ...], tuple[HkAnnualAnchor, ...], tuple[HkBodyEvidence, ...]]:
+    """异步编排本地读取；取消时等待拥有原件和 worker 的线程收口。
+
+    参数：ticker/repository/checkpoint 为公司、仓储及 Host 取消观察。
+    返回：本地原件及年度输入。异常：取消在收口后传播；工作错误原样透传。
+    """
+    stopped = Event()
+    controlled = _DiscoveryCheckpoint(stopped, checkpoint)
+    controlled()
+    task = asyncio.create_task(asyncio.to_thread(_read_local_hk_inputs, ticker, repository, controlled))
+    result = await await_owned_task(task, stopped)
+    controlled()
+    return result

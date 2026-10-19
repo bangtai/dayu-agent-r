@@ -1,5 +1,6 @@
+from dayu.fins.pipelines.cn_download_models import HkAnnualAnchor, HkBodyEvidence
 """F5 真实 Fs 下载 A+未知 B、日期共享 writer 和 rebuild 原资产保全；仅合成资产。"""
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import CnReportPdf
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol, NoopCnDownloadPdfGate
 
 import asyncio
@@ -47,13 +48,14 @@ class _RawDiscovery(_FakeDiscoveryClient):
         """参数为隔离目录与合成 raw；返回无；异常无。"""
         super().__init__(temp_dir=temp_dir, candidates=())
         self.raw = raw
-    def list_report_candidates(self, query: CnReportQuery, profile: CnCompanyProfile, *, local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol, cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
+    def list_report_candidates(self, query: CnReportQuery, profile: CnCompanyProfile, *, local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol, local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
         """参数为 mandatory discovery 输入；返回真实 selection；取消与来源冲突原样抛出。"""
         del profile
         self.queries.append(query)
         if cancellation_checkpoint is not None:
             cancellation_checkpoint()
-        return select_hkexnews_report_candidates(query=query, announcements=self.raw, local_annual_ends=local_annual_ends, read_head_meta=_head_meta)
+        selected = select_hkexnews_report_candidates(query=query, announcements=self.raw, local_annual_ends=local_annual_ends, read_head_meta=_head_meta)
+        return CnReportDiscoveryResult(selected.candidates, selected.uncertain_reports, (), ())
 
 
 def _tree(root: Path) -> dict[str, bytes]:
@@ -107,7 +109,7 @@ def test_local_complete_annual_is_shared_with_remote_and_rebuild(tmp_path: Path)
     pipeline = _build_pipeline(tmp_path=tmp_path, discovery=seed, hk_discovery=seed, converter=_FakeConverter())
     pipeline.download(ticker="0700", form_type="FY", start_date="2024", end_date="2026", start_is_explicit=True)
     entries = pipeline.source_repository.read_source_meta_integrity_view("0700", SourceKind.FILING, batch=None)
-    assert tuple(local_hk_annual_ends(entries).values()) == (date(2024, 12, 31),)
+    assert tuple(anchor.end for anchor in local_hk_annual_ends(entries).values()) == (date(2024, 12, 31),)
     entry = entries[0]
     for meta in ({**entry.source_meta, "is_deleted": True}, {**entry.source_meta, "company_id": "HKEX:foreign"}, {**entry.source_meta, "ticker": "0005"}):
         assert local_hk_annual_ends((replace(entry, source_meta=meta),)) == {}
@@ -129,7 +131,7 @@ def test_date_source_normal_rebuild_overwrite_same_owner(tmp_path: Path, with_en
     """参数为真实根及直接日期分支；返回无；三 writer 时序/旧 processed 清 None/v3/内容版本错误时断言失败。"""
     report_date = "2025-09-30" if with_end else None
     title = "截至2025年9月30日止第三季度業績" if with_end else "2025年第三季度業績"
-    candidate = replace(_candidate(source_id="same", fiscal_year=2025, fiscal_period="Q3", provider="hkexnews", filing_date="2025-11-13"), title=title, category_text="季度業績", report_date=report_date)
+    candidate = replace(_candidate(source_id="same", fiscal_year=2025, fiscal_period="Q3", provider="hkexnews", filing_date="2025-11-13"), title=title, category_text="季度業績", report_date=report_date, report_date_source="source_title" if with_end else None)
     discovery = _FakeDiscoveryClient(temp_dir=tmp_path, candidates=(candidate,))
     pipeline = _build_pipeline(tmp_path=tmp_path, discovery=discovery, hk_discovery=discovery, converter=_FakeConverter())
     first = pipeline.download(ticker="0700", form_type="Q3", start_date="2025", end_date="2025", start_is_explicit=True)

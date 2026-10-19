@@ -70,9 +70,9 @@ def test_hk_period_facts_use_fiscal_evidence(
         title=title, category_text="季度業績", annual_ends=annual_end_dates((annual_title,))
     )
     assert facts is not None
-    assert facts[0] == year
-    assert facts[1].identity_period == period
-    assert facts[1].covered_periods == {"Q2": ("H1", "Q2"), "Q4": ("FY", "Q4")}.get(period, (period,))
+    assert facts.fiscal_year == year
+    assert facts.projection.identity_period == period
+    assert facts.projection.covered_periods == {"Q2": ("H1", "Q2"), "Q4": ("FY", "Q4")}.get(period, (period,))
 
 
 @pytest.mark.parametrize(

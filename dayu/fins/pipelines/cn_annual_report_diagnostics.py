@@ -7,7 +7,7 @@ from typing import Literal
 
 from dayu.fins._log import Log
 from dayu.fins.pipelines.cn_annual_report_facts import CnAnnualReportFactsReason
-from dayu.fins.pipelines.cn_annual_report_source import CnAnnualReportSourceReason
+from dayu.fins.pipelines.report_original_source import ReportOriginalSourceReason
 
 CnAnnualReportRejectionStage = Literal[
     "remote_discovery", "local_discovery", "download_review", "complete_original_review", "local_declaration_read",
@@ -29,7 +29,7 @@ def log_cn_annual_report_rejection(
     *,
     source_id: str,
     stage: CnAnnualReportRejectionStage,
-    reason: CnAnnualReportFactsReason | CnAnnualReportSourceReason | Literal["source_document_facts_mismatch"],
+    reason: CnAnnualReportFactsReason | ReportOriginalSourceReason | Literal["source_document_facts_mismatch"],
     document_id: str | None = None,
 ) -> None:
     """在默认日志记录 owner 原因和调用边界引用，不记录底层异常。
@@ -37,7 +37,7 @@ def log_cn_annual_report_rejection(
     参数：source_id 为已知公告引用；stage 为实际输入阶段；reason 由事实/声明/比对 owner 产生；
     document_id 仅在已有真实文档身份时提供。返回：无。异常：日志系统原异常透传。
     """
-    safe_reason = reason.value if isinstance(reason, (CnAnnualReportFactsReason, CnAnnualReportSourceReason)) else reason
+    safe_reason = reason.value if isinstance(reason, (CnAnnualReportFactsReason, ReportOriginalSourceReason)) else reason
     message = (f"CN年度原件拒绝 provider=cninfo source_id={_safe_reference(source_id, _SOURCE_REFERENCE)} "
                f"stage={stage} reason={safe_reason}")
     if document_id is not None:

@@ -1,7 +1,8 @@
 """CN/HK download runtime 接入测试。"""
 
 from __future__ import annotations
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import HkAnnualAnchor, HkBodyEvidence
+from dayu.fins.pipelines.cn_download_models import CnReportPdf
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol, NoopCnDownloadPdfGate
 from tests.fins.test_cn_annual_report_facts import build_synthetic_annual_pdf
 
@@ -269,8 +270,8 @@ class _RuntimeFakeDiscoveryClient:
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回固定年度报告候选。
 
@@ -292,7 +293,7 @@ class _RuntimeFakeDiscoveryClient:
             cancellation_checkpoint()
         fiscal_year = 2025 if query.market == "CN" else 2024
         filing_date = "2026-04-01" if query.market == "CN" else "2025-04-08"
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(
             CnReportCandidate(fiscal_year_source="source_document" if query.market == "CN" else "title_or_category_inferred",
                 provider="hkexnews" if query.market == "HK" else "cninfo",
                 source_id=self.source_id,
@@ -1651,8 +1652,8 @@ def test_cn_real_phase_b_abort_keeps_published_document_in_result_and_job(
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回两个不同文档 ID 的候选。
 
@@ -1668,8 +1669,8 @@ def test_cn_real_phase_b_abort_keeps_published_document_in_result_and_job(
             无。
         """
 
-        first = original_list(query, profile, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends, local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates[0]
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(first, replace(first, source_id="cn-runtime-b2", fiscal_year=2024, filing_date="2025-04-01")), uncertain_reports=())
+        first = original_list(query, profile, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends, local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates[0]
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(first, replace(first, source_id="cn-runtime-b2", fiscal_year=2024, filing_date="2025-04-01")), uncertain_reports=())
 
     def download_second_with_stray(candidate: CnReportCandidate) -> DownloadedReportAsset:
         """在第二候选 Phase A 后创建未发布 exact target。
@@ -1773,8 +1774,8 @@ def test_hk_real_commit_preflight_uses_same_partial_failure_route(
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """给 HK 来源增加第二个不同年份的候选。
 
@@ -1790,8 +1791,8 @@ def test_hk_real_commit_preflight_uses_same_partial_failure_route(
             无。
         """
 
-        first = original_list(query, profile, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends, local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates[0]
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(first, replace(first, source_id="hk-runtime-b2", fiscal_year=2023, filing_date="2024-04-08")), uncertain_reports=())
+        first = original_list(query, profile, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends, local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates[0]
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(first, replace(first, source_id="hk-runtime-b2", fiscal_year=2023, filing_date="2024-04-08")), uncertain_reports=())
 
     def root_stray_after_first(candidate: CnReportCandidate) -> DownloadedReportAsset:
         """在第二次真实 commit 的 whole-tree 校验前创建 root 外来文件。
@@ -1904,8 +1905,8 @@ def test_cn_post_repair_abort_then_same_request_skips_complete_source_and_downlo
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """从中止请求起提供原候选及尚未发布的第二候选。
 
@@ -1921,8 +1922,8 @@ def test_cn_post_repair_abort_then_same_request_skips_complete_source_and_downlo
             无。
         """
 
-        first_candidate = original_candidates(query, profile, local_cn_annual_pdfs=local_cn_annual_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(
+        first_candidate = original_candidates(query, profile, local_report_pdfs=local_report_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(
             first_candidate,
             replace(first_candidate, source_id="cn-runtime-b2", fiscal_year=2024, filing_date="2025-04-01"),
         ), uncertain_reports=())
@@ -2091,8 +2092,8 @@ def test_cn_post_repair_real_second_source_revision_conflict_preserves_public_su
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回两份身份财期不同且都会被选中的真实仓储候选。
 
@@ -2108,8 +2109,8 @@ def test_cn_post_repair_real_second_source_revision_conflict_preserves_public_su
             无。
         """
 
-        first = original_candidates(query, profile, local_cn_annual_pdfs=local_cn_annual_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(first, replace(first, source_id="cn-runtime-b2", fiscal_year=2024, filing_date="2025-04-01")), uncertain_reports=())
+        first = original_candidates(query, profile, local_report_pdfs=local_report_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(first, replace(first, source_id="cn-runtime-b2", fiscal_year=2024, filing_date="2025-04-01")), uncertain_reports=())
 
     monkeypatch.setattr(discovery, "list_report_candidates", list_two)
     request = build_fins_download_request(
@@ -2302,12 +2303,12 @@ class _RuntimeTwoIdentityCandidates:
 
     def __call__(
         self, query: CnReportQuery, profile: CnCompanyProfile, *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回两个候选。参数：query/profile/cancellation_checkpoint 为原输入。返回：两年度候选。异常：原取消异常。"""
-        first = self.original(query, profile, local_cn_annual_pdfs=local_cn_annual_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(first, replace(first, source_id="next-year", fiscal_year=2023, filing_date="2024-04-08")), uncertain_reports=())
+        first = self.original(query, profile, local_report_pdfs=local_report_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(first, replace(first, source_id="next-year", fiscal_year=2023, filing_date="2024-04-08")), uncertain_reports=())
 
 
 class _RuntimeIdentityWindowCorruption:
@@ -2436,15 +2437,15 @@ class _ThreeCnIntegrityCandidates:
         self.original = discovery.list_report_candidates
 
     def __call__(self, query: CnReportQuery, profile: CnCompanyProfile, *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
         """返回三个年度候选。
 
         参数：query/profile 为真实输入；cancellation_checkpoint 为取消检查。
         返回：2025/2024/2023 候选。异常：原检查异常原样传播。
         """
-        first = self.original(query, profile, local_cn_annual_pdfs=local_cn_annual_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(first, replace(first, source_id="integrity-second", fiscal_year=2024, filing_date="2025-04-01"),
+        first = self.original(query, profile, local_report_pdfs=local_report_pdfs, pdf_download_gate=pdf_download_gate, cancellation_checkpoint=cancellation_checkpoint, local_annual_ends=local_annual_ends).candidates[0]
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(first, replace(first, source_id="integrity-second", fiscal_year=2024, filing_date="2025-04-01"),
             replace(first, source_id="integrity-tail", fiscal_year=2023, filing_date="2024-04-01")), uncertain_reports=())
 
 
@@ -2662,7 +2663,7 @@ class _DiagnosticsCandidateMetadata:
 
         self.delegate = discovery.list_report_candidates
 
-    def __call__(self, query: CnReportQuery, profile: CnCompanyProfile, *, local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol, cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
+    def __call__(self, query: CnReportQuery, profile: CnCompanyProfile, *, local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol, local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
         """在 discovery 边界补入来源明确提供的报告日和覆盖期间。
 
         参数：query 为包含市场、表单和日期窗口的报告查询；profile 为公司元数据；
@@ -2674,7 +2675,7 @@ class _DiagnosticsCandidateMetadata:
             TypeError / ValueError，期间投影构造违反类型或覆盖期间契约时抛出。
         """
 
-        original = self.delegate(query, profile, local_annual_ends=local_annual_ends, cancellation_checkpoint=cancellation_checkpoint, local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), )
+        original = self.delegate(query, profile, local_annual_ends=local_annual_ends, cancellation_checkpoint=cancellation_checkpoint, local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), )
         return replace(original, candidates=tuple(replace(candidate,
             report_date="2024-12-31" if candidate.provider == "hkexnews" else "2025-12-31",
             period_projection=CnReportPeriodProjection(identity_period="FY", covered_periods=("FY", "Q4") if candidate.provider == "hkexnews" else ("FY",)))
@@ -2694,7 +2695,7 @@ class _DiagnosticsChangedHkCoverage:
 
         self.delegate = discovery.list_report_candidates
 
-    def __call__(self, query: CnReportQuery, profile: CnCompanyProfile, *, local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol, cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
+    def __call__(self, query: CnReportQuery, profile: CnCompanyProfile, *, local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol, local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None) -> CnReportDiscoveryResult:
         """在 discovery 边界改变 HK 已知覆盖，保留原候选身份。
 
         参数：query 为包含市场、表单和日期窗口的报告查询；profile 为公司元数据；
@@ -2706,7 +2707,7 @@ class _DiagnosticsChangedHkCoverage:
             TypeError / ValueError，期间投影构造违反类型或覆盖期间契约时抛出。
         """
 
-        original = self.delegate(query, profile, local_annual_ends=local_annual_ends, cancellation_checkpoint=cancellation_checkpoint, local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), )
+        original = self.delegate(query, profile, local_annual_ends=local_annual_ends, cancellation_checkpoint=cancellation_checkpoint, local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), )
         return replace(original, candidates=tuple(replace(candidate, period_projection=CnReportPeriodProjection(identity_period="FY", covered_periods=("FY", "Q4"))) for candidate in original.candidates))
 
 

@@ -14,7 +14,7 @@ from dayu.contracts.json_value import JsonValue
 from dayu.fins.domain.enums import SourceKind
 from dayu.fins.domain.document_models import SourceDocumentStateChangeRequest
 from dayu.fins.downloaders import hkexnews_downloader as hk
-from dayu.fins.pipelines.cn_download_models import CnReportPeriodProjection, CnReportHeadMeta, HkexnewsRawAnnouncement
+from dayu.fins.pipelines.cn_download_models import CnReportPeriodProjection, CnReportHeadMeta, HkAnnualAnchor, HkexnewsRawAnnouncement
 from dayu.fins.pipelines.cn_report_selection import (
     hk_annual_end_date, local_hk_annual_ends, resolve_hk_report_period, select_hkexnews_report_candidates,
 )
@@ -202,7 +202,9 @@ def test_single_calendar_owner_has_exact_neighbor_boundary(distance: int) -> Non
     anchors = (end - timedelta(days=distance), end + timedelta(days=distance))
     expected = tuple(sorted(set(anchors))) if distance <= 366 else ()
     assert relevant_annual_end_dates(end, anchors + anchors) == expected
-    assert resolve_hk_report_period(title="截至2025年9月30日止第三季度業績", category_text="季度業績", annual_ends=(date(2020, 6, 30),)) == (2025, _head_projection())
+    resolution = resolve_hk_report_period(title="截至2025年9月30日止第三季度業績", category_text="季度業績", annual_ends=(date(2020, 6, 30),))
+    assert resolution is not None and resolution.fiscal_year == 2025 and resolution.projection == _head_projection()
+    assert resolution.report_date == "2025-09-30" and resolution.report_date_source == "source_title"
 
 
 def _head_projection() -> CnReportPeriodProjection:
@@ -216,17 +218,19 @@ def test_same_evidence_local_remote_english_and_conflict() -> None:
     annual = replace(_hk_raw(document_id="annual", title="ANNUAL RESULTS FOR YEAR ENDED 31 DECEMBER 2024", category_text="Annual Results"), language="en")
     ends = (date(2024, 12, 31),)
     assert hk_annual_end_date(title=annual.title, category_text=annual.category_text) == ends[0]
-    narrow = select_hkexnews_report_candidates(query=_hk_query(("Q3",)), announcements=(quarter,), local_annual_ends=ends, read_head_meta=_head_meta)
+    narrow = select_hkexnews_report_candidates(query=_hk_query(("Q3",)), announcements=(quarter,), local_annual_ends=(HkAnnualAnchor(ends[0], annual.document_id, annual.source_url),), read_head_meta=_head_meta)
     broad = select_hkexnews_report_candidates(query=_hk_query(("Q3",)), announcements=(annual, quarter), local_annual_ends=(), read_head_meta=_head_meta)
     assert narrow == broad
     assert len(narrow.candidates) == 1 and not narrow.uncertain_reports
     unknown = select_hkexnews_report_candidates(query=_hk_query(("Q3",)), announcements=(quarter,), local_annual_ends=(), read_head_meta=_no_head)
-    conflict = select_hkexnews_report_candidates(query=_hk_query(("Q3",)), announcements=(quarter,), local_annual_ends=ends + (date(2025, 6, 30),), read_head_meta=_no_head)
+    conflict = select_hkexnews_report_candidates(query=_hk_query(("Q3",)), announcements=(quarter,), local_annual_ends=(HkAnnualAnchor(ends[0], annual.document_id, annual.source_url), HkAnnualAnchor(date(2025, 6, 30), "other", annual.source_url)), read_head_meta=_no_head)
     assert len(unknown.uncertain_reports) == len(conflict.uncertain_reports) == 1
     assert not unknown.candidates and not conflict.candidates
     assert unknown.uncertain_reports[0].existing_document_id is None
     assert unknown.uncertain_reports[0].report_date == "2025-09-30"
-    assert resolve_hk_report_period(title=quarter.title, category_text=quarter.category_text, annual_ends=ends) == (2025, _head_projection())
+    resolution = resolve_hk_report_period(title=quarter.title, category_text=quarter.category_text, annual_ends=ends)
+    assert resolution is not None and resolution.fiscal_year == 2025 and resolution.projection == _head_projection()
+    assert resolution.report_date == "2025-09-30" and resolution.report_date_source == "source_title"
 
 
 def _no_head(url: str) -> CnReportHeadMeta:
@@ -256,7 +260,7 @@ def test_remote_annual_and_candidates_use_same_query_window(english: bool) -> No
     assert outside.uncertain_reports[0].source_id == "B"
     broad = replace(narrow, start_date=annual.filing_date)
     known = select_hkexnews_report_candidates(query=broad, announcements=(annual, quarter, annual), local_annual_ends=(), read_head_meta=_head_meta)
-    local = select_hkexnews_report_candidates(query=narrow, announcements=(annual, quarter), local_annual_ends=(date(2024, 12, 31),), read_head_meta=_head_meta)
+    local = select_hkexnews_report_candidates(query=narrow, announcements=(annual, quarter), local_annual_ends=(HkAnnualAnchor(date(2024, 12, 31), annual.document_id, annual.source_url),), read_head_meta=_head_meta)
     assert known == local
     assert len(known.candidates) == 1 and not known.uncertain_reports
     assert known.candidates[0].source_id == "B"
@@ -359,5 +363,9 @@ def test_official_frozen_raw_preserves_hash_scope_and_explicit_q3() -> None:
     annuals = tuple(d for r in raw if (d := hk_annual_end_date(title=r.title, category_text=r.category_text)) is not None)
     assert annuals == (date(2024, 12, 31),)
     quarter = next(r for r in raw if r.document_id == "11914784")
-    assert resolve_hk_report_period(title=quarter.title, category_text=quarter.category_text, annual_ends=()) == (2025, _head_projection())
-    assert resolve_hk_report_period(title=quarter.title, category_text=quarter.category_text, annual_ends=annuals) == (2025, _head_projection())
+    resolution = resolve_hk_report_period(title=quarter.title, category_text=quarter.category_text, annual_ends=())
+    assert resolution is not None and resolution.fiscal_year == 2025 and resolution.projection == _head_projection()
+    assert resolution.report_date == "2025-09-30" and resolution.report_date_source == "source_title"
+    resolution = resolve_hk_report_period(title=quarter.title, category_text=quarter.category_text, annual_ends=annuals)
+    assert resolution is not None and resolution.fiscal_year == 2025 and resolution.projection == _head_projection()
+    assert resolution.report_date == "2025-09-30" and resolution.report_date_source == "source_title"

@@ -9,8 +9,8 @@ import pytest
 from dayu.contracts.json_value import JsonValue
 from dayu.fins.domain.document_models import SourceDocumentRevision
 from dayu.fins.domain.enums import SourceKind
-from dayu.fins.pipelines.cn_annual_report_source import project_cn_annual_report_original, read_cn_annual_report_pdf, CnAnnualReportSourceError
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPublication, CnDownloadCancelledError
+from dayu.fins.pipelines.report_original_source import project_report_original, read_report_pdf, ReportOriginalSourceError
+from dayu.fins.pipelines.cn_download_models import CnReportPublication, CnDownloadCancelledError
 from dayu.fins.storage.repository_protocols import SourceSnapshotProtocol
 from dayu.fins.pipelines.cn_pipeline import CnPipeline
 from dayu.fins.storage.source_integrity import SourceIntegrityClassification, SourceIntegrityRevisionConflictError, SourceIntegrityRepairRequiredError, SourceIntegrityPreflightError, SourceIntegrityStatus, SourceIntegrityReason
@@ -28,12 +28,12 @@ def test_real_exact_original(tmp_path: Path) -> None:
     """参数：真实根。返回：无。异常：原件名、版本或 locator 偏差断言失败。"""
     pipeline=_seed(tmp_path);entry=pipeline.source_repository.read_source_meta_integrity_view('600519',SourceKind.FILING,batch=None)[0]
     assert entry.integrity.revision is not None
-    publication=CnAnnualReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
+    publication=CnReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
     calls:list[int]=[]
-    pdf=read_cn_annual_report_pdf('600519',entry.document_id,publication,entry.source_meta,pipeline.source_repository,lambda: calls.append(1))
+    pdf=read_report_pdf('600519',entry.document_id,publication,entry.source_meta,pipeline.source_repository,lambda: calls.append(1))
     assert len(calls)==5 and pdf.publication==publication and pdf.source_url==_candidate().source_url
     with pipeline.source_repository.read_source_snapshot('600519',entry.document_id,SourceKind.FILING,materialize_files=True) as snapshot:
-        descriptor=project_cn_annual_report_original(snapshot)
+        descriptor=project_report_original(snapshot)
         assert descriptor.name==entry.document_id+'.pdf'
         with snapshot.get_source(descriptor.name).open() as stream:assert stream.read()==pdf.pdf_bytes
 
@@ -56,7 +56,7 @@ def test_projection_declared_role_only(tmp_path: Path,monkeypatch: pytest.Monkey
             """参数：真实 snapshot。返回：测试声明。异常：无。"""
             return meta
         monkeypatch.setattr(type(snapshot),'source_meta',property(altered))
-        with pytest.raises(CnAnnualReportSourceError):project_cn_annual_report_original(snapshot)
+        with pytest.raises(ReportOriginalSourceError):project_report_original(snapshot)
 
 
 @pytest.mark.parametrize('locator',('',None,42,' ','opaque locator'))
@@ -64,7 +64,7 @@ def test_actual_locator_exact_predicate(tmp_path: Path,monkeypatch: pytest.Monke
     """参数：根及实际 locator。返回：无。异常：predicate 或原样保留漂移断言失败。"""
     pipeline=_seed(tmp_path);entry=pipeline.source_repository.read_source_meta_integrity_view('600519',SourceKind.FILING,batch=None)[0]
     assert entry.integrity.revision is not None
-    publication=CnAnnualReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
+    publication=CnReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
     snapshot=pipeline.source_repository.read_source_snapshot('600519',entry.document_id,SourceKind.FILING,materialize_files=True)
     meta={**snapshot.source_meta,'source_url':locator}
     def altered(self: SourceSnapshotProtocol) -> Mapping[str,JsonValue]:
@@ -74,9 +74,9 @@ def test_actual_locator_exact_predicate(tmp_path: Path,monkeypatch: pytest.Monke
         """参数：仓储 read 输入。返回：实际已取 snapshot。异常：无。"""
         return snapshot
     monkeypatch.setattr(type(snapshot),'source_meta',property(altered));monkeypatch.setattr(pipeline.source_repository,'read_source_snapshot',acquire)
-    if type(locator) is str and locator!='':assert read_cn_annual_report_pdf('600519',entry.document_id,publication,entry.source_meta,pipeline.source_repository,None).source_url==locator
+    if type(locator) is str and locator!='':assert read_report_pdf('600519',entry.document_id,publication,entry.source_meta,pipeline.source_repository,None).source_url==locator
     else:
-        with pytest.raises(CnAnnualReportSourceError):read_cn_annual_report_pdf('600519',entry.document_id,publication,entry.source_meta,pipeline.source_repository,None)
+        with pytest.raises(ReportOriginalSourceError):read_report_pdf('600519',entry.document_id,publication,entry.source_meta,pipeline.source_repository,None)
     with pytest.raises(RuntimeError):snapshot.get_source(entry.document_id+'.pdf').open()
 
 
@@ -85,8 +85,8 @@ def test_raw_meta_same_revision_mismatch(tmp_path: Path,field: str,value: JsonVa
     """参数：根及 raw JSON 差异。返回：无。异常：静默规范化或旧值被信任断言失败。"""
     pipeline=_seed(tmp_path);entry=pipeline.source_repository.read_source_meta_integrity_view('600519',SourceKind.FILING,batch=None)[0]
     assert entry.integrity.revision is not None
-    witness=CnAnnualReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
-    with pytest.raises(SourceIntegrityRevisionConflictError):read_cn_annual_report_pdf('600519',entry.document_id,witness,{**entry.source_meta,field:value},pipeline.source_repository,None)
+    witness=CnReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
+    with pytest.raises(SourceIntegrityRevisionConflictError):read_report_pdf('600519',entry.document_id,witness,{**entry.source_meta,field:value},pipeline.source_repository,None)
 
 
 @pytest.mark.parametrize('at',range(1,6))
@@ -94,7 +94,7 @@ def test_cancel_every_read_checkpoint(tmp_path: Path,monkeypatch: pytest.MonkeyP
     """参数：根与 checkpoint 序号。返回：无。异常：取消对象改变或快照未释放断言失败。"""
     pipeline=_seed(tmp_path);entry=pipeline.source_repository.read_source_meta_integrity_view('600519',SourceKind.FILING,batch=None)[0]
     assert entry.integrity.revision is not None
-    witness=CnAnnualReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
+    witness=CnReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
     expected=CnDownloadCancelledError('source cancelled');calls:list[int]=[];snapshots:list[SourceSnapshotProtocol]=[];real=pipeline.source_repository.read_source_snapshot
     def acquire(ticker: str,document_id: str,source_kind: SourceKind,*,materialize_files: bool) -> SourceSnapshotProtocol:
         """参数：真实仓储输入。返回：真实 snapshot。异常：原仓储错误。"""
@@ -104,7 +104,7 @@ def test_cancel_every_read_checkpoint(tmp_path: Path,monkeypatch: pytest.MonkeyP
         calls.append(1)
         if len(calls)==at:raise expected
     monkeypatch.setattr(pipeline.source_repository,'read_source_snapshot',acquire)
-    with pytest.raises(CnDownloadCancelledError) as raised:read_cn_annual_report_pdf('600519',entry.document_id,witness,entry.source_meta,pipeline.source_repository,checkpoint)
+    with pytest.raises(CnDownloadCancelledError) as raised:read_report_pdf('600519',entry.document_id,witness,entry.source_meta,pipeline.source_repository,checkpoint)
     assert raised.value is expected
     for snapshot in snapshots:
         with pytest.raises(RuntimeError):snapshot.get_source(entry.document_id+'.pdf').open()
@@ -115,7 +115,7 @@ def test_acquire_error_mapping(tmp_path: Path,monkeypatch: pytest.MonkeyPatch,ki
     """参数：根及真实 acquire 故障类型。返回：无。异常：错映射或重复 acquire 断言失败。"""
     pipeline=_seed(tmp_path);entry=pipeline.source_repository.read_source_meta_integrity_view('600519',SourceKind.FILING,batch=None)[0]
     assert entry.integrity.revision is not None
-    witness=CnAnnualReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
+    witness=CnReportPublication('cninfo','A1',entry.document_id,entry.integrity.revision)
     expected=FileNotFoundError() if kind=='missing' else OSError('storage') if kind=='os' else ValueError('storage')
     def acquire(ticker: str,document_id: str,source_kind: SourceKind,*,materialize_files: bool) -> SourceSnapshotProtocol:
         """参数：仓储输入。返回：不返回。异常：测试原错误。"""
@@ -129,6 +129,6 @@ def test_acquire_error_mapping(tmp_path: Path,monkeypatch: pytest.MonkeyPatch,ki
         return classification
     monkeypatch.setattr(pipeline.source_repository,'read_source_snapshot',acquire);monkeypatch.setattr(pipeline.source_repository,'classify_source_integrity',classify)
     error_type={'repair':SourceIntegrityRepairRequiredError,'unsafe':SourceIntegrityPreflightError,'revision':SourceIntegrityRevisionConflictError,'missing':SourceIntegrityRevisionConflictError}.get(kind,type(expected))
-    with pytest.raises(error_type) as raised:read_cn_annual_report_pdf('600519',entry.document_id,witness,entry.source_meta,pipeline.source_repository,None)
+    with pytest.raises(error_type) as raised:read_report_pdf('600519',entry.document_id,witness,entry.source_meta,pipeline.source_repository,None)
     if kind in ('value','os'):assert raised.value is expected
     else:assert raised.value.__cause__ is expected

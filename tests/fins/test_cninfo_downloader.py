@@ -15,7 +15,7 @@
 
 from __future__ import annotations
 from tests.fins.test_cn_annual_report_facts import build_synthetic_annual_pdf
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import CnReportPdf
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol, NoopCnDownloadPdfGate
 
 import json
@@ -425,7 +425,7 @@ def test_list_report_candidates_filters_blocklisted_titles() -> None:
             discovery_periods=("FY",),
         ),
         profile,
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert len(candidates) == 1
     only = candidates[0]
@@ -484,7 +484,7 @@ def test_list_report_candidates_filters_english_quarterly_report_title() -> None
         discovery_periods=("Q3",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [candidate.source_id for candidate in candidates] == ["Q3_CN"]
 
@@ -543,7 +543,7 @@ def test_list_report_candidates_prefers_full_fy_over_later_report_notice() -> No
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [candidate.source_id for candidate in candidates] == ["FULL"]
 
@@ -572,7 +572,7 @@ def test_list_report_candidates_returns_empty_for_cninfo_independent_q2_q4() -> 
 
     client = _build_client(handler)
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
     assert query_calls == 0
@@ -641,7 +641,7 @@ def test_list_report_candidates_prefers_a_share_fy_over_later_h_share_notice() -
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [candidate.source_id for candidate in candidates] == ["A1"]
 
@@ -686,7 +686,7 @@ def test_list_report_candidates_raises_on_failed_period_query() -> None:
     profile = client.resolve_company(query)
 
     with pytest.raises(FinsDownloadProviderError) as exc_info:
-        client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.source is FinsDownloadSource.CNINFO
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.HTTP_STATUS
@@ -715,7 +715,7 @@ def test_list_report_candidates_raises_when_period_query_fails() -> None:
     profile = client.resolve_company(query)
 
     with pytest.raises(FinsDownloadProviderError) as exc_info:
-        client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.HTTP_STATUS
     assert exc_info.value.retryable is True
@@ -781,7 +781,7 @@ def test_list_report_candidates_filters_non_pdf_and_other_sec_code() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [candidate.source_id for candidate in candidates] == ["A1"]
 
@@ -833,7 +833,7 @@ def test_list_report_candidates_amended_takes_priority() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert len(candidates) == 1
     assert candidates[0].source_id == "A2"
@@ -894,7 +894,7 @@ def test_list_report_candidates_keeps_one_per_year_for_fy() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [c.fiscal_year for c in candidates] == [2024, 2023, 2022]
     assert [c.source_id for c in candidates] == ["A1", "A2", "A3"]
@@ -954,7 +954,7 @@ def test_list_report_candidates_picks_amended_per_year_without_dropping_other_ye
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [(c.fiscal_year, c.source_id, c.amended) for c in candidates] == [
         (2024, "A2", True),
@@ -1018,7 +1018,7 @@ def test_list_report_candidates_handles_pagination() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     # 两条 announcement 同 fiscal_period=FY，但属于不同 fiscal_year；
     # 按 (period, fiscal_year) 分组去重 -> 两条都保留，按年份降序排。
@@ -1067,7 +1067,7 @@ def test_list_report_candidates_head_failure_softly_degrades() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert len(candidates) == 1
     only = candidates[0]
@@ -1096,7 +1096,7 @@ def test_list_report_candidates_empty_when_no_announcements() -> None:
         discovery_periods=("FY", "H1"),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
 
@@ -1124,7 +1124,7 @@ def test_list_report_candidates_treats_null_announcements_as_empty() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
 
@@ -1188,7 +1188,7 @@ def test_list_report_candidates_null_empty_period_does_not_block_other_periods()
         discovery_periods=("FY", "H1", "Q1", "Q3"),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert len(candidates) == 1
     only = candidates[0]
@@ -1219,7 +1219,7 @@ def test_list_report_candidates_missing_announcements_key_raises() -> None:
     profile = client.resolve_company(query)
 
     with pytest.raises(FinsDownloadProviderError) as exc_info:
-        client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.source is FinsDownloadSource.CNINFO
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.PROTOCOL
@@ -1262,7 +1262,7 @@ def test_list_report_candidates_non_list_announcements_raises(
     profile = client.resolve_company(query)
 
     with pytest.raises(FinsDownloadProviderError) as exc_info:
-        client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.PROTOCOL
     assert exc_info.value.safe_message == "巨潮来源返回的公告列表格式不符合预期"
@@ -1291,7 +1291,7 @@ def test_list_report_candidates_invalid_profile_provider_raises() -> None:
                 discovery_periods=("FY",),
             ),
             bogus_profile,
-         local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+         local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 def test_list_report_candidates_uses_per_period_category() -> None:
@@ -1318,7 +1318,7 @@ def test_list_report_candidates_uses_per_period_category() -> None:
         discovery_periods=("FY", "H1", "Q1", "Q3"),
     )
     profile = client.resolve_company(query)
-    client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     # URL-encoded 分号 -> %3B
     assert sorted(seen_categories) == sorted(
@@ -1367,7 +1367,7 @@ def test_list_report_candidates_calls_same_checkpoint_around_each_period_post() 
         query,
         profile,
         cancellation_checkpoint=checkpoint,
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
     assert events == [
@@ -1434,7 +1434,7 @@ def test_list_report_candidates_calls_checkpoint_around_every_paginated_post() -
         query,
         profile,
         cancellation_checkpoint=checkpoint,
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert events[:6] == ["CP1", "POST(1)", "CP2", "CP3", "POST(2)", "CP4"]
     assert all(event.startswith("CP") for event in events[6:])
@@ -1510,7 +1510,7 @@ def test_list_report_candidates_preserves_cancel_identity_and_stops_next_period(
             query,
             profile,
             cancellation_checkpoint=checkpoint,
-         local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+         local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value is expected
     assert events == expected_events
@@ -1553,7 +1553,7 @@ def test_list_report_candidates_preserves_checkpoint_failure_identity() -> None:
             query,
             profile,
             cancellation_checkpoint=checkpoint,
-         local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+         local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value is expected
     assert exc_info.value.__cause__ is original
@@ -1777,7 +1777,7 @@ def test_announcement_time_milliseconds_is_normalized() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates[0].filing_date == "2025-04-03"
 
@@ -2012,7 +2012,7 @@ def test_serialize_query_payload_structure_assertion() -> None:
         discovery_periods=("FY",),
     )
     profile = client.resolve_company(query)
-    client.list_report_candidates(query, profile, local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    client.list_report_candidates(query, profile, local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert seen_payload["stock"] == "002594,gssz0002594"
     assert seen_payload["column"] == "szse"
@@ -2060,7 +2060,7 @@ def test_form_payload_serialization_round_trip_via_json() -> None:
 
 from pathlib import Path
 from tests.fins.test_cn_annual_report_facts import FIXTURES
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf,CnAnnualReportPublication
+from dayu.fins.pipelines.cn_download_models import CnReportPdf,CnReportPublication
 from dayu.fins.domain.document_models import SourceDocumentRevision
 
 
@@ -2092,9 +2092,9 @@ def _official_rows() -> list[JsonValue]:
 def test_official_prepared_assets_selected_only() -> None:
     """参数：无。返回：无。异常：重复GET、摘要payload泄漏或事实错配断言失败。"""
     gets:list[str]=[];client=_official_discovery_client(_official_rows(),gets);query=CnReportQuery('CN','601225','2018-01-01','2026-10-12',('FY',))
-    result=client.list_report_candidates(query,client.resolve_company(query),local_annual_ends=(),local_cn_annual_pdfs=(),pdf_download_gate=NoopCnDownloadPdfGate())
+    result=client.list_report_candidates(query,client.resolve_company(query),local_annual_ends=(),local_report_pdfs=(),pdf_download_gate=NoopCnDownloadPdfGate())
     assert len(gets)==13 and len(set(gets))==13 and len(result.candidates)==len(result.prepared_assets)==9
-    assert result.local_annual_publications==() and result.uncertain_reports==()
+    assert result.local_publications==() and result.uncertain_reports==()
     for asset in result.prepared_assets:
         assert asset.pdf_bytes==(FIXTURES/f'{asset.candidate.source_id}.pdf').read_bytes()
         assert asset.content_length==len(asset.pdf_bytes)
@@ -2107,14 +2107,14 @@ def test_official_discovery_boundaries(case: str) -> None:
     if case=='duplicate':rows.append(rows[0])
     client=_official_discovery_client(rows,gets,'1204545056' if case=='bad_unselected' else None)
     query=CnReportQuery('CN','601225','2018-01-01','2026-10-12',('FY',));profile=client.resolve_company(query)
-    local: tuple[CnAnnualReportPdf, ...]=() if case!='local_locator' else (CnAnnualReportPdf(CnAnnualReportPublication('cninfo','1213161683','doc',SourceDocumentRevision('r')),'opaque old locator',(FIXTURES/'1213161683.pdf').read_bytes()),)
+    local: tuple[CnReportPdf, ...]=() if case!='local_locator' else (CnReportPdf(CnReportPublication('cninfo','1213161683','doc',SourceDocumentRevision('r')),'opaque old locator',(FIXTURES/'1213161683.pdf').read_bytes()),)
     if case=='local_locator':
-        result=client.list_report_candidates(query,profile,local_annual_ends=(),local_cn_annual_pdfs=local,pdf_download_gate=NoopCnDownloadPdfGate())
+        result=client.list_report_candidates(query,profile,local_annual_ends=(),local_report_pdfs=local,pdf_download_gate=NoopCnDownloadPdfGate())
         assert '1213161683' not in gets
-        assert len(result.local_annual_publications)==1
-        assert result.local_annual_publications[0].source_id=='1213161683'
+        assert len(result.local_publications)==1
+        assert result.local_publications[0].publication.source_id=='1213161683'
         assert len(result.prepared_assets)==8
     else:
-        with pytest.raises(FinsDownloadProviderError) as raised:client.list_report_candidates(query,profile,local_annual_ends=(),local_cn_annual_pdfs=local,pdf_download_gate=NoopCnDownloadPdfGate())
+        with pytest.raises(FinsDownloadProviderError) as raised:client.list_report_candidates(query,profile,local_annual_ends=(),local_report_pdfs=local,pdf_download_gate=NoopCnDownloadPdfGate())
         assert raised.value.transport_category is FinsDownloadTransportCategory.PROTOCOL and raised.value.retryable is False
         if case=='duplicate':assert gets==[]
