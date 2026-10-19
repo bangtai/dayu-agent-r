@@ -1,0 +1,86 @@
+{
+  "description": "香港交易所官方完整分类响应原始字节；离线回归只从原始category/title准入年度证据，不预注入日期。",
+  "stock_code": "00388",
+  "captures": [
+    {
+      "file": "plan-discovery-01.json",
+      "url": "https://www1.hkexnews.hk/search/titleSearchServlet.do?lang=zh&category=0&market=SEHK&stockId=781&searchType=1&documentType=-1&t1code=40000&t2Gcode=-2&t2code=40100&fromDate=20250101&toDate=20261018&MB-Daterange=0&sortByOptions=DateTime&sortDir=0&rowRange=100",
+      "status_code": 200,
+      "retrieved_at": "2026-10-18T13:51:50.959945+00:00",
+      "sha256": "aeccdcaf1303421fc83f727e1c280ebf72f1661c071d1f6253bed4fd0fc64f44",
+      "bytes": 1229
+    },
+    {
+      "file": "plan-discovery-02.json",
+      "url": "https://www1.hkexnews.hk/search/titleSearchServlet.do?lang=zh&category=0&market=SEHK&stockId=781&searchType=1&documentType=-1&t1code=40000&t2Gcode=-2&t2code=40200&fromDate=20250101&toDate=20261018&MB-Daterange=0&sortByOptions=DateTime&sortDir=0&rowRange=100",
+      "status_code": 200,
+      "retrieved_at": "2026-10-18T13:51:54.448326+00:00",
+      "sha256": "ab71115547bdb241688a381b6b9e1520a36d9616cccb08722e7f9f589f3a9eec",
+      "bytes": 1360
+    },
+    {
+      "file": "plan-discovery-03.json",
+      "url": "https://www1.hkexnews.hk/search/titleSearchServlet.do?lang=zh&category=0&market=SEHK&stockId=781&searchType=1&documentType=-1&t1code=10000&t2Gcode=3&t2code=-2&fromDate=20250101&toDate=20261018&MB-Daterange=0&sortByOptions=DateTime&sortDir=0&rowRange=100",
+      "status_code": 200,
+      "retrieved_at": "2026-10-18T13:51:56.901252+00:00",
+      "sha256": "5e57e9bea03225f1dde71e39597a0a80dee9ba3d4c1f2c12283db85735a5a17a",
+      "bytes": 14535
+    }
+  ],
+  "official_pdf_references": [
+    {
+      "source_id": "11655015",
+      "title": "截至2025年3月31日止三個月的季度業績",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0430/2025043000614_c.pdf",
+      "status_code": 200,
+      "file": "official-11655015.pdf",
+      "bytes": 1258001,
+      "sha256": "5eb09ff3a4038e35e3768e31088551792908a1b401ffa910b6d0beb07fb44054",
+      "pages": 24,
+      "content_type": "application/pdf",
+      "retrieved_at": "2026-10-18T13:51:57.448020+00:00",
+      "artifact_kind": "complete_official_pdf_reference_not_bundled"
+    },
+    {
+      "source_id": "12131985",
+      "title": "截至2026年3月31日止三個月的季度業績",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0429/2026042900420_c.pdf",
+      "status_code": 200,
+      "file": "official-12131985.pdf",
+      "bytes": 1223491,
+      "sha256": "0bd0d0d506a62e5c0bf453c34fc9b7164742e4b96b081232bf0cd71182711621",
+      "pages": 22,
+      "content_type": "application/pdf",
+      "retrieved_at": "2026-10-18T13:51:57.933771+00:00",
+      "artifact_kind": "complete_official_pdf_reference_not_bundled"
+    },
+    {
+      "source_id": "11548890",
+      "title": "截至2024年12月31日止年度的綜合財務報表",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0227/2025022700760_c.pdf",
+      "status_code": 200,
+      "file": "official-11548890.pdf",
+      "bytes": 1821599,
+      "sha256": "2af259612a4649d72ed62d4b39affccfdfa59145f841e78b404bb42a7a67634e",
+      "pages": 95,
+      "content_type": "application/pdf",
+      "retrieved_at": "2026-10-18T13:51:59.406990+00:00",
+      "artifact_kind": "complete_official_pdf_reference_not_bundled"
+    },
+    {
+      "source_id": "12030670",
+      "title": "截至2025年12月31日止年度的綜合財務報表",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0226/2026022600691_c.pdf",
+      "status_code": 200,
+      "file": "official-12030670.pdf",
+      "bytes": 1778269,
+      "sha256": "935fede3ce5f8108c908239c2bd52fdc3d388a59ce89976d1c9620b443b61b94",
+      "pages": 98,
+      "content_type": "application/pdf",
+      "retrieved_at": "2026-10-18T13:52:00.701274+00:00",
+      "artifact_kind": "complete_official_pdf_reference_not_bundled"
+    }
+  ],
+  "derived_assets": [],
+  "asset_boundary": "三个JSON响应为逐字保存的官方原件；PDF只保留完整原件provenance，不打包PDF或派生PDF。workflow测试的PDF/Docling资产为合成，不能替代真实CLI验收。"
+}
