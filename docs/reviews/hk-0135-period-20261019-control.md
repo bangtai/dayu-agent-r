@@ -1,6 +1,6 @@
 # 0135 四来源未决：追加 goal confirmation
 
-状态：9633已完成final closeout；0135当前gate / next entry point = ready-to-open-draft-PR（完整审核及必要双路复审已通过，待重核远端base/head后提交独立delta并交付核对；尚非final closeout）。用户确认继续有效，无需重复请求确认。
+状态：0135 draft PR205已创建并完成总控交付核对、draft-PR-pass；current gate / next entry point = final closeout（实质收尾文档已写，待治理提交push后最终远端OID核验）。用户确认持续有效，META仍顺序独立。
 
 确认回执：协调方全文读取后明确确认顺序独立单元、四来源目标/边界/验收、固定入口同参普通增量、原失败与四份资产身份保留、指定模型与适用计划审核/双路完整代码审核及必要复审、回归/pyright/入口核验。确认9633以PR203分支为base，0135在9633完整交付后以其已审最终分支/head另建分支/draft PR仅交0135 delta，开工重核远端，不改旧PR、不重复旧改动、不merge；无代码缺口不强造PR。确认没有其它已知重复派发，不保证未知全局同根因。此授权允许前置完成后自动推进，无需重复目标确认；无timer及其它范围扩大授权。
 
@@ -325,3 +325,7 @@ DS `code-review-20261019-124220.md`（natived9347b0e-f7f9-4f70-ad82-69c194d92f1f
 首次暂存检查在提交前停止：四份官方 PDF 的前段字节被 Git 启发式识别为文本，原始 CR 换行被 `git diff --cached --check` 报为空白错误。完整失败 stdout（528516字节）保留于 `delivery-preflight-01/staged-diff-check-before.stdout`，未提交、未格式化原件。新增 `tests/fixtures/hk_body_official/.gitattributes` 的 `*.pdf binary`，只声明二进制归档/不做行尾规范化。root重核54份已审文件SHA全等，四PDF属性binary set、text/diff/merge unset；后续核索引blob原字节及文本diff检查。当前intended为84路径，META control仍排除。
 
 已阅读tests README职责和fixture段落；现有说明已记录完整官方原件及URL/SHA/storage读回。本次仅Git归档属性，不改变测试层级、入口、运行期契约或官方证据，不机械增写README，不重跑无受影响的代码审核/pytest/pyright。产品与fixtures按fix06已审冻结版验证继续有效；只补归档属性、索引SHA及staged diff check。current gate=必要提交/push，尚未draft-PR-pass。
+
+## PR205交付核对 / final closeout入口
+
+独立draft PR205 https://github.com/noho/dayu-agent-r/pull/205 ，产品head ec6585b2cff25d05b7506dcc10cd7a67c90696e0，base f975a9586261bf7750e632959848bb6392c2881b。`delivery-audit-01/decision.json`已按实际API身份/精确OID完整diff、84路径、54已审产品SHA、title/body和远端push核对通过。check-runs/statuses均0，不称CI通过，本地mandatory验证真实满足。draft-PR-pass已成立，不跳过final closeout。实质收尾见`hk-0135-period-20261019-closeout.md`；仅治理提交push和最终远端核验尚待完成。原PR203/204保持、不merge/timer。协调方pane当前有用户未发送草稿，通知正文先保存，未清除/拼接/投递，不能称已通知。
