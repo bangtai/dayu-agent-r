@@ -21,11 +21,11 @@ from dayu.fins.downloaders.cninfo_downloader import CNINFO_QUERY_URL, CNINFO_STO
 from dayu.fins.pipelines import cn_annual_report_facts
 from dayu.fins.pipelines.cn_annual_report_diagnostics import log_cn_annual_report_rejection
 from dayu.fins.pipelines.cn_annual_report_facts import CnAnnualReportFactsError, CnAnnualReportFactsReason, resolve_cn_annual_report_facts
-from dayu.fins.pipelines.cn_annual_report_source import CnAnnualReportSourceReason
+from dayu.fins.pipelines.report_original_source import ReportOriginalSourceReason
 from dayu.fins.pipelines.cn_download_filing_workflow import CnDownloadAnnualPublicationError, run_cn_download_single_filing_stream
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPublication, CnAnnualReportPdf, CnReportCandidate, CnReportQuery, DownloadedReportAsset
+from dayu.fins.pipelines.cn_download_models import CnReportPublication, CnReportPdf, CnReportCandidate, CnReportQuery, DownloadedReportAsset
 from dayu.fins.pipelines.cn_download_pdf_gate import NoopCnDownloadPdfGate
-from dayu.fins.pipelines.cn_download_workflow import _read_local_cn_annual_pdfs
+from dayu.fins.pipelines.cn_download_workflow import _read_local_report_pdfs
 from dayu.fins.pipelines.cn_form_utils import PeriodDownloadWindow
 from dayu.fins.pipelines.cn_pipeline import CnPipeline
 from dayu.fins.pipelines.download_events import DownloadEvent
@@ -78,10 +78,10 @@ class _OfficialHttp:
         return httpx.Response(200, content=payload)
 
 
-def _discover(client: CninfoDiscoveryClient, local: tuple[CnAnnualReportPdf, ...] = ()) -> tuple[CnReportCandidate, ...]:
+def _discover(client: CninfoDiscoveryClient, local: tuple[CnReportPdf, ...] = ()) -> tuple[CnReportCandidate, ...]:
     """通过真实生产发现返回候选。参数：HTTP client/本地原件。返回：候选。异常：原发现错误。"""
     return client.list_report_candidates(QUERY, client.resolve_company(QUERY), local_annual_ends=(),
-        local_cn_annual_pdfs=local, pdf_download_gate=NoopCnDownloadPdfGate()).candidates
+        local_report_pdfs=local, pdf_download_gate=NoopCnDownloadPdfGate()).candidates
 
 
 @pytest.mark.parametrize('source_id,year', (('1225065145', 2025), ('1222951181', 2024)))
@@ -122,7 +122,7 @@ def test_official_bare_discovery_prepared_assets() -> None:
     """四个原分类得到七个候选且 prepared 同源。参数：无。返回：无。异常：身份/摘要过滤/资产漂移断言失败。"""
     http = _OfficialHttp(); client = _build_client(http)
     result = client.list_report_candidates(QUERY, client.resolve_company(QUERY), local_annual_ends=(),
-        local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate())
+        local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate())
     assert {c.source_id: (c.fiscal_year, c.period_projection.identity_period) for c in result.candidates} == EXPECTED
     assert http.gets == list(ANNUAL_IDS) and not result.uncertain_reports
     assert {a.candidate.source_id for a in result.prepared_assets} == set(ANNUAL_IDS)
@@ -176,7 +176,7 @@ async def _single(pipeline: CnPipeline, candidate: CnReportCandidate, prepared: 
         discovery_client=pipeline.cn_discovery_client, pdf_download_gate=pipeline.pdf_download_gate,
         docling_conversion_runner=pipeline.docling_conversion_runner, ticker='000333',
         profile=pipeline.cn_discovery_client.resolve_company(QUERY), candidate=candidate,
-        prepared_asset=prepared, local_annual_publication=None, overwrite=False, cancel_checker=None, module='TEST')]
+        prepared_asset=prepared, local_publication=None, overwrite=False, cancel_checker=None, module='TEST')]
 
 
 @pytest.mark.parametrize('path', ('prepared', 'direct', 'complete'))
@@ -202,9 +202,9 @@ def test_official_actual_filing_entry_paths(tmp_path: Path, path: str) -> None:
 def test_discovery_rejection_logs_exact_stage(tmp_path: Path, caplog: pytest.LogCaptureFixture, local: bool) -> None:
     """落选年度坏件仍整体失败；本地与远端有独立阶段。参数：隔离根/日志/路径。返回：无。异常：scope 漂移断言失败。"""
     http = _OfficialHttp(bad_source='1222951181'); client = _build_client(http)
-    cached: tuple[CnAnnualReportPdf, ...] = ()
+    cached: tuple[CnReportPdf, ...] = ()
     if local:
-        cached = (CnAnnualReportPdf(CnAnnualReportPublication('cninfo', '1222951181', 'existing-doc', SourceDocumentRevision('r')),
+        cached = (CnReportPdf(CnReportPublication('cninfo', '1222951181', 'existing-doc', SourceDocumentRevision('r')),
             'opaque locator', b'%PDF-' + b'0' * 2048),)
     converter = _FakeConverter(); pipeline = _build_pipeline(tmp_path=tmp_path, discovery=client, converter=converter)
     with pytest.raises(FinsDownloadProviderError) as raised:
@@ -236,7 +236,7 @@ def test_cause_and_unsafe_identity_never_leak(monkeypatch: pytest.MonkeyPatch, c
     caplog.clear()
     unsafe = 'http://private.invalid/?token=secret\n\x1b' + 'X' * 300
     log_cn_annual_report_rejection(source_id=unsafe, stage='local_declaration_read',
-        reason=CnAnnualReportSourceReason.ORIGINAL_UNCONFIRMED, document_id=unsafe)
+        reason=ReportOriginalSourceReason.ORIGINAL_UNCONFIRMED, document_id=unsafe)
     assert unsafe not in caplog.text and '<不可展示;sha256=' in caplog.text
     assert hashlib.sha256(unsafe.encode()).hexdigest() in caplog.text
     assert len(caplog.records) == 1 and '\x1b' not in caplog.text
@@ -280,12 +280,12 @@ def test_local_declaration_rejection_is_not_parser_reason(tmp_path: Path, caplog
     before = _state(pipeline)
     if stage == 'local_declaration_read':
         with pytest.raises(FinsDownloadProviderError):
-            _read_local_cn_annual_pdfs('000333', (PeriodDownloadWindow('FY', QUERY.start_date, QUERY.end_date),), pipeline.source_repository, None)
+            _read_local_report_pdfs('000333', (PeriodDownloadWindow('FY', QUERY.start_date, QUERY.end_date),), pipeline.source_repository, None)
     else:
         with pytest.raises(CnDownloadAnnualPublicationError) as raised:
             asyncio.run(_single(pipeline, candidate, None))
         assert raised.value.reason == 'source_document_facts_mismatch'
     assert f'stage={stage}' in caplog.text
-    assert CnAnnualReportSourceReason.ORIGINAL_UNCONFIRMED.value in caplog.text
+    assert ReportOriginalSourceReason.ORIGINAL_UNCONFIRMED.value in caplog.text
     assert CnAnnualReportFactsReason.UNSUPPORTED_SUFFIX.value not in caplog.text
     assert _state(pipeline) == before

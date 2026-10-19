@@ -1,4 +1,4 @@
-"""CN 年度当前原件的唯一声明投影与 exact publication 读取 owner。"""
+"""CN/HK 当前原件的唯一声明投影与 exact publication 读取 owner。"""
 
 from collections.abc import Callable, Mapping
 from enum import Enum
@@ -6,7 +6,7 @@ import hashlib
 
 from dayu.contracts.json_value import JsonValue
 from dayu.fins.domain.enums import SourceKind
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf, CnAnnualReportPublication
+from dayu.fins.pipelines.cn_download_models import CnReportPdf, CnReportPublication
 from dayu.fins.storage import SourceDocumentRepositoryProtocol
 from dayu.fins.storage.repository_protocols import SourceSnapshotProtocol, SourceSnapshotFileDescriptor
 from dayu.fins.storage.source_integrity import (
@@ -18,44 +18,44 @@ _PDF_MEDIA = "application/pdf"
 _RANGE_FIELDS = ("ingest_method", "is_deleted", "filing_date", "fiscal_year", "fiscal_period", "covered_fiscal_periods")
 
 
-class CnAnnualReportSourceReason(str, Enum):
+class ReportOriginalSourceReason(str, Enum):
     """原件声明 owner 的安全拒绝原因，不代表 PDF 文字解析结果。"""
 
-    ORIGINAL_UNCONFIRMED = "本地年度报告声明或原件字节无法确认"
+    ORIGINAL_UNCONFIRMED = "本地报告声明或原件字节无法确认"
 
 
-class CnAnnualReportSourceError(ValueError):
+class ReportOriginalSourceError(ValueError):
     """本地声明与实际原件关系不能被确认；不是完整性调度错误。"""
 
     def __init__(self) -> None:
         """构造有界安全原因。参数：无。返回：无。异常：无。"""
-        self.reason = CnAnnualReportSourceReason.ORIGINAL_UNCONFIRMED
-        super().__init__("本地年度报告缺少可信且唯一声明的 PDF 原件，无法确认原文")
+        self.reason = ReportOriginalSourceReason.ORIGINAL_UNCONFIRMED
+        super().__init__("本地报告缺少可信且唯一声明的 PDF 原件，无法确认原文")
 
 
-def project_cn_annual_report_original(snapshot: SourceSnapshotProtocol) -> SourceSnapshotFileDescriptor:
+def project_report_original(snapshot: SourceSnapshotProtocol) -> SourceSnapshotFileDescriptor:
     """纯投影唯一显式 original PDF。
 
     参数：snapshot 为同版仓储快照。返回：exact 原件 descriptor。
-    异常：CnAnnualReportSourceError 表示角色、媒体类型或声明不一致。
+    异常：ReportOriginalSourceError 表示角色、媒体类型或声明不一致。
     """
     files = snapshot.source_meta.get("files")
     if not isinstance(files, list):
-        raise CnAnnualReportSourceError()
+        raise ReportOriginalSourceError()
     originals = tuple(entry for entry in files if isinstance(entry, Mapping) and entry.get("source") == "original")
     if len(originals) != 1:
-        raise CnAnnualReportSourceError()
+        raise ReportOriginalSourceError()
     entry = originals[0]
     name = entry.get("name")
     if type(name) is not str or name == "" or entry.get("content_type") != _PDF_MEDIA:
-        raise CnAnnualReportSourceError()
+        raise ReportOriginalSourceError()
     matches = tuple(d for d in snapshot.files if d.name == name)
     if len(matches) != 1 or matches[0].content_type != _PDF_MEDIA:
-        raise CnAnnualReportSourceError()
+        raise ReportOriginalSourceError()
     descriptor = matches[0]
     for field, declared in (("size", descriptor.size), ("sha256", descriptor.sha256)):
         if entry.get(field) is not None and entry.get(field) != declared:
-            raise CnAnnualReportSourceError()
+            raise ReportOriginalSourceError()
     return descriptor
 
 
@@ -65,14 +65,14 @@ def _checkpoint(checkpoint: Callable[[], None] | None) -> None:
         checkpoint()
 
 
-def read_cn_annual_report_pdf(
+def read_report_pdf(
     ticker: str,
     document_id: str,
-    expected_publication: CnAnnualReportPublication,
+    expected_publication: CnReportPublication,
     expected_meta: Mapping[str, JsonValue],
     source_repository: SourceDocumentRepositoryProtocol,
     cancellation_checkpoint: Callable[[], None] | None,
-) -> CnAnnualReportPdf:
+) -> CnReportPdf:
     """从 exact 当前 publication 读取声明原件，确保释放快照与 stream。
 
     参数：ticker/document_id 为 exact target；expected_publication/expected_meta 来自同窗 COMPLETE；
@@ -106,10 +106,10 @@ def read_cn_annual_report_pdf(
             or any(meta.get(field) != expected_meta.get(field) for field in _RANGE_FIELDS)
             or any(meta.get(field) != expected_meta.get(field) for field in ("source_provider", "source_id"))):
             raise SourceIntegrityRevisionConflictError()
-        descriptor = project_cn_annual_report_original(snapshot)
+        descriptor = project_report_original(snapshot)
         locator = meta.get("source_url")
         if type(locator) is not str or locator == "":
-            raise CnAnnualReportSourceError()
+            raise ReportOriginalSourceError()
         _checkpoint(cancellation_checkpoint)
         with snapshot.get_source(descriptor.name).open() as stream:
             payload = stream.read()
@@ -117,7 +117,7 @@ def read_cn_annual_report_pdf(
         if not payload or (descriptor.size is not None and descriptor.size != len(payload)) or (
             descriptor.sha256 is not None and descriptor.sha256 != hashlib.sha256(payload).hexdigest()
         ):
-            raise CnAnnualReportSourceError()
-        result = CnAnnualReportPdf(expected_publication, locator, payload)
+            raise ReportOriginalSourceError()
+        result = CnReportPdf(expected_publication, locator, payload)
     _checkpoint(cancellation_checkpoint)
     return result

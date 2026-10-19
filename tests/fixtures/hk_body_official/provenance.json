@@ -1,0 +1,146 @@
+[
+  {
+    "source_id": "11584251",
+    "filename": "2025032501182_c.pdf",
+    "http": {
+      "started_at": "2026-10-18T20:02:03.463665+00:00",
+      "finished_at": "2026-10-18T20:02:03.936323+00:00",
+      "method": "GET",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0325/2025032501182_c.pdf",
+      "status_code": 200,
+      "request_headers": {
+        "user-agent": "DayuAgent/1.0 (+hk-download)"
+      },
+      "headers": {
+        "content-type": "application/pdf",
+        "content-length": "953553",
+        "last-modified": "Tue, 25 Mar 2025 11:54:56 GMT",
+        "date": "Sun, 18 Oct 2026 20:02:03 GMT"
+      },
+      "bytes": 953553,
+      "sha256": "cf17a4f3b4df1ebd47e41d625e892a2c70ab37023793885559b4d1a726bcc0e7"
+    },
+    "raw": {
+      "FILE_INFO": "931KB",
+      "NEWS_ID": "11584251",
+      "SHORT_TEXT": "公告及通告 - [末期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期]<br/>",
+      "TOTAL_COUNT": "16",
+      "DOD_WEB_PATH": "",
+      "STOCK_NAME": "昆侖能源",
+      "TITLE": "業績公佈",
+      "FILE_TYPE": "PDF",
+      "DATE_TIME": "25/03/2025 19:54",
+      "LONG_TEXT": "公告及通告 - [末期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期]",
+      "STOCK_CODE": "00135",
+      "FILE_LINK": "/listedco/listconews/sehk/2025/0325/2025032501182_c.pdf"
+    }
+  },
+  {
+    "source_id": "11801353",
+    "filename": "2025081901239_c.pdf",
+    "http": {
+      "started_at": "2026-10-18T20:02:04.063418+00:00",
+      "finished_at": "2026-10-18T20:02:04.472995+00:00",
+      "method": "GET",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2025/0819/2025081901239_c.pdf",
+      "status_code": 200,
+      "request_headers": {
+        "user-agent": "DayuAgent/1.0 (+hk-download)"
+      },
+      "headers": {
+        "content-type": "application/pdf",
+        "content-length": "905991",
+        "last-modified": "Tue, 19 Aug 2025 10:45:21 GMT",
+        "date": "Sun, 18 Oct 2026 20:02:04 GMT"
+      },
+      "bytes": 905991,
+      "sha256": "05bf5f0da6501fd470c614650c7ef41581b7193739a1c0a2579e2039ac212b5e"
+    },
+    "raw": {
+      "FILE_INFO": "885KB",
+      "NEWS_ID": "11801353",
+      "SHORT_TEXT": "公告及通告 - [中期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期 &#x2f; 股息或分派]<br/>",
+      "TOTAL_COUNT": "16",
+      "DOD_WEB_PATH": "",
+      "STOCK_NAME": "昆侖能源",
+      "TITLE": "業績公佈",
+      "FILE_TYPE": "PDF",
+      "DATE_TIME": "19/08/2025 18:45",
+      "LONG_TEXT": "公告及通告 - [中期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期 &#x2f; 股息或分派]",
+      "STOCK_CODE": "00135",
+      "FILE_LINK": "/listedco/listconews/sehk/2025/0819/2025081901239_c.pdf"
+    }
+  },
+  {
+    "source_id": "12065226",
+    "filename": "2026032401291_c.pdf",
+    "http": {
+      "started_at": "2026-10-18T20:02:04.586939+00:00",
+      "finished_at": "2026-10-18T20:02:05.294625+00:00",
+      "method": "GET",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0324/2026032401291_c.pdf",
+      "status_code": 200,
+      "request_headers": {
+        "user-agent": "DayuAgent/1.0 (+hk-download)"
+      },
+      "headers": {
+        "content-type": "application/pdf",
+        "content-length": "943947",
+        "last-modified": "Tue, 24 Mar 2026 12:46:36 GMT",
+        "date": "Sun, 18 Oct 2026 20:02:04 GMT"
+      },
+      "bytes": 943947,
+      "sha256": "e33e9d27e6cd3979bd501a84f0b17a448c957f8a0341df8021e17a80b21ef87c"
+    },
+    "raw": {
+      "FILE_INFO": "922KB",
+      "NEWS_ID": "12065226",
+      "SHORT_TEXT": "公告及通告 - [末期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期]<br/>",
+      "TOTAL_COUNT": "16",
+      "DOD_WEB_PATH": "",
+      "STOCK_NAME": "昆侖能源",
+      "TITLE": "業績公佈",
+      "FILE_TYPE": "PDF",
+      "DATE_TIME": "24/03/2026 20:46",
+      "LONG_TEXT": "公告及通告 - [末期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期]",
+      "STOCK_CODE": "00135",
+      "FILE_LINK": "/listedco/listconews/sehk/2026/0324/2026032401291_c.pdf"
+    }
+  },
+  {
+    "source_id": "12299283",
+    "filename": "2026082502306_c.pdf",
+    "http": {
+      "started_at": "2026-10-18T20:02:05.421387+00:00",
+      "finished_at": "2026-10-18T20:02:05.840516+00:00",
+      "method": "GET",
+      "url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0825/2026082502306_c.pdf",
+      "status_code": 200,
+      "request_headers": {
+        "user-agent": "DayuAgent/1.0 (+hk-download)"
+      },
+      "headers": {
+        "content-type": "application/pdf",
+        "content-length": "925754",
+        "last-modified": "Tue, 25 Aug 2026 14:44:53 GMT",
+        "date": "Sun, 18 Oct 2026 20:02:05 GMT"
+      },
+      "bytes": 925754,
+      "sha256": "d14c416c46963b2dfa8b4200d30cb6d706b107dd5a532c45d907265e1f40ea87"
+    },
+    "raw": {
+      "FILE_INFO": "904KB",
+      "NEWS_ID": "12299283",
+      "SHORT_TEXT": "公告及通告 - [中期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期 &#x2f; 股息或分派]<br/>",
+      "TOTAL_COUNT": "16",
+      "DOD_WEB_PATH": "",
+      "STOCK_NAME": "昆侖能源",
+      "TITLE": "業績公佈",
+      "FILE_TYPE": "PDF",
+      "DATE_TIME": "25/08/2026 22:44",
+      "LONG_TEXT": "公告及通告 - [中期業績 &#x2f; 暫停辦理過戶登記手續或更改暫停辦理過戶日期 &#x2f; 股息或分派]",
+      "STOCK_CODE": "00135",
+      "FILE_LINK": "/listedco/listconews/sehk/2026/0825/2026082502306_c.pdf"
+    }
+  }
+]

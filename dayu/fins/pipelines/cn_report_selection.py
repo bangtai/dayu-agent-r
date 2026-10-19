@@ -8,15 +8,20 @@
 from __future__ import annotations
 
 import re
+import calendar
+from dataclasses import dataclass
+from enum import Enum
 from datetime import date
 from collections.abc import Callable, Mapping
 from typing import Final, Literal, Optional, TypeAlias
 
 from dayu.fins.pipelines.cn_download_models import (
+    HkAnnualAnchor, HkBodyEvidence, HkBodySelection, HkPeriodResolution,
     CN_FISCAL_PERIOD_ORDER,
     CnFiscalPeriod,
     CnAnnualReportFacts,
     CnReportCandidate,
+    CnReportPublication,
     CnReportDiscoveryResult,
     CnReportHeadMeta,
     CnReportPeriodProjection,
@@ -392,16 +397,17 @@ def select_hkexnews_report_candidates(
     *,
     query: CnReportQuery,
     announcements: tuple[HkexnewsRawAnnouncement, ...],
-    local_annual_ends: tuple[date, ...],
+    local_annual_ends: tuple[HkAnnualAnchor, ...],
     read_head_meta: Callable[[str], CnReportHeadMeta],
-) -> CnReportDiscoveryResult:
+    body_evidence: Mapping[str, HkBodyEvidence] | None = None,
+) -> HkReportSelection:
     """从披露易 raw announcements 选择财报候选。
 
     Args:
         query: 单次 HK download 查询。
         announcements: downloader 拉回的 raw 公告。
         read_head_meta: 读取 PDF HEAD 元数据的 HTTP 边界函数。
-        local_annual_ends: 同公司可信本地年度证据。
+        local_annual_ends: 同公司可信本地年度证据；body_evidence 为按原来源绑定的直接正文事实。
 
     Returns:
         按财年/财期排序的完整候选和按来源排序的独立未知集合。
@@ -411,6 +417,8 @@ def select_hkexnews_report_candidates(
         Exception: HEAD 边界的原异常透传。
     """
 
+    bodies = body_evidence if body_evidence is not None else {}
+    resolutions: dict[str, HkPeriodResolution] = {}
     grouped: dict[tuple[CnFiscalPeriod, int], list[HkexnewsRawAnnouncement]] = {}
     projection_by_document_id: dict[str, CnReportPeriodProjection] = {}
     # 先校验全响应的同来源冲突，再以同一查询窗集合供年度证据与候选选择。
@@ -419,29 +427,43 @@ def select_hkexnews_report_candidates(
         item for item in _deduplicate_hk_announcements(announcements)
         if query.start_date <= item.filing_date <= query.end_date
     )
-    annual_ends = tuple(sorted(set(local_annual_ends) | {
-        end for item in scoped
-        if (end := hk_annual_end_date(title=item.title, category_text=item.category_text)) is not None
-    }))
+    by_id = {item.document_id: item for item in scoped}
+    for key, evidence in bodies.items():
+        item = by_id.get(key)
+        if (item is None or evidence.source_id != key or evidence.source_url != item.source_url
+            or evidence.ticker != query.normalized_ticker or evidence.facts.ticker != query.normalized_ticker):
+            raise ValueError("正文输入与本次公司/官方来源不匹配")
+    title_anchors = tuple(HkAnnualAnchor(end, item.document_id, item.source_url)
+        for item in scoped if (end := hk_annual_end_date(title=item.title, category_text=item.category_text)) is not None)
+    # 先确认全部正文年度，再构建统一锚，不能由输入顺序决定中期结果。
+    body_anchors = tuple(HkAnnualAnchor(e.facts.end, e.source_id, e.source_url, e.publication, e.facts)
+        for item in scoped if (e := bodies.get(item.document_id)) is not None
+        and e.facts.kind == "annual"
+        and resolve_hk_report_period(title=item.title, category_text=item.category_text, annual_ends=(), body=e) is not None)
+    anchors = _merge_hk_annual_anchors((*local_annual_ends, *title_anchors, *body_anchors))
+    annual_ends = tuple(sorted({anchor.end for anchor in anchors}))
     uncertain: list[FinsDownloadUncertainReport] = []
     for item in scoped:
         if _is_english_hk_announcement(item):
             continue
-        facts = resolve_hk_report_period(
-            title=item.title,
-            category_text=item.category_text,
-            annual_ends=annual_ends,
-        )
-        if facts is None:
+        body = bodies.get(item.document_id)
+        outcome = (resolve_hk_body_period_state(item.title, item.category_text, annual_ends, body, anchors)
+            if body is not None else resolve_hk_report_period(
+                title=item.title, category_text=item.category_text, annual_ends=annual_ends))
+        if not isinstance(outcome, HkPeriodResolution):
             if _has_hk_unresolved_report_signal(title=item.title, category_text=item.category_text):
                 end = hk_report_end_date(item.title)
+                if isinstance(outcome, HkBodyPeriodPartial) and outcome.report_date is not None:
+                    end = outcome.report_date
                 uncertain.append(FinsDownloadUncertainReport(
                     source_id=item.document_id, filing_date=item.filing_date,
                     report_date=end.isoformat() if end is not None else None,
                     existing_document_id=None, reason_category="uncertain_hk_period",
                 ))
             continue
-        fiscal_year, period_projection = facts
+        facts = outcome
+        fiscal_year, period_projection = facts.fiscal_year, facts.projection
+        resolutions[item.document_id] = facts
         if period_projection.identity_period not in query.discovery_periods:
             continue
         projection_by_document_id[item.document_id] = period_projection
@@ -458,10 +480,11 @@ def select_hkexnews_report_candidates(
                 period_projection=projection_by_document_id[best.document_id],
                 fiscal_year=fiscal_year,
                 head_meta=read_head_meta(best.source_url),
+                resolution=resolutions[best.document_id],
             )
         )
     candidates.sort(key=lambda item: (-item.fiscal_year, _PERIOD_SORT_KEY[item.period_projection.identity_period]))
-    return CnReportDiscoveryResult(tuple(candidates), tuple(sorted(uncertain, key=lambda r: (r.filing_date or "", r.source_id))), (), ())
+    return HkReportSelection(tuple(candidates), tuple(sorted(uncertain, key=lambda r: (r.filing_date or "", r.source_id))), tuple(HkBodySelection(bodies[c.source_id], resolutions[c.source_id]) for c in candidates if c.report_date_source == "source_document"))
 
 
 def is_cninfo_report_title_admissible(title: str) -> bool:
@@ -668,12 +691,17 @@ def resolve_hk_report_period(
     title: str,
     category_text: str,
     annual_ends: tuple[date, ...],
-) -> tuple[int, CnReportPeriodProjection] | None:
+    body: HkBodyEvidence | None = None,
+    annual_anchors: tuple[HkAnnualAnchor, ...] = (),
+) -> HkPeriodResolution | None:
     """为发现与本地重建统一解析港股财年和财期。
 
-    参数：title、category_text 为来源事实；annual_ends 为同公司年度截止日证据。
+    参数：title/category_text 为来源事实；annual_ends 为同公司年度截止日；body/body_anchors 为本条正文与年度正文来源。
     返回：财年和身份/覆盖投影；缺少或冲突返回 None。异常：无。
     """
+    if body is not None:
+        outcome = resolve_hk_body_period_state(title, category_text, annual_ends, body, annual_anchors)
+        return outcome if isinstance(outcome, HkPeriodResolution) else None
     subject = hk_report_subject_title(title)
     if subject is None:
         return None
@@ -700,7 +728,10 @@ def resolve_hk_report_period(
         return None
     if not labelled and len(_hk_title_years(title)) > 1:
         return None
-    return (year, projection) if year is not None and projection is not None else None
+    if year is None or projection is None:
+        return None
+    return HkPeriodResolution(year, projection, end.isoformat() if end is not None else None,
+                              "source_title" if end is not None else None, "title_or_category_inferred")
 
 
 def _parse_chinese_digit_year(value: str) -> int | None:
@@ -1023,6 +1054,7 @@ def _build_hk_candidate(
     period_projection: CnReportPeriodProjection,
     fiscal_year: int,
     head_meta: CnReportHeadMeta,
+    resolution: HkPeriodResolution,
 ) -> CnReportCandidate:
     """把披露易 raw announcement 构造为候选对象。
 
@@ -1039,7 +1071,6 @@ def _build_hk_candidate(
         ValueError: 已确认公告没有唯一主体时抛出。
     """
 
-    end = hk_report_end_date(announcement.title)
     return CnReportCandidate(
         provider="hkexnews",
         source_id=announcement.document_id,
@@ -1047,10 +1078,11 @@ def _build_hk_candidate(
         title=announcement.title,
         language=announcement.language,
         category_text=announcement.category_text,
-        report_date=end.isoformat() if end is not None else None,
+        report_date=resolution.report_date,
+        report_date_source=resolution.report_date_source,
         filing_date=announcement.filing_date,
         fiscal_year=fiscal_year,
-        fiscal_year_source="title_or_category_inferred",
+        fiscal_year_source=resolution.fiscal_year_source,
         period_projection=period_projection,
         amended=_is_hk_amended_title(announcement.title),
         content_length=head_meta.content_length,
@@ -1101,18 +1133,35 @@ def hk_annual_end_date(*, title: str, category_text: str) -> date | None:
     # 年度源独立通过统一解析的完整歧义校验，不向外部或自身借用年度证据。
     # 未决标题资格不参与供证，不能否决已确认的官方末期业绩事实。
     facts = resolve_hk_report_period(title=title, category_text=category_text, annual_ends=())
-    if facts is None or facts[1].identity_period not in {"FY", "Q4"}:
+    if facts is None or facts.projection.identity_period not in {"FY", "Q4"}:
         return None
     return hk_report_end_date(title)
 
 
-def local_hk_annual_ends(entries: tuple[SourceMetaIntegrityReadEntry, ...]) -> dict[str, date]:
+def _merge_hk_annual_anchors(anchors: tuple[HkAnnualAnchor, ...]) -> tuple[HkAnnualAnchor, ...]:
+    """合并同一官方来源的年度见证，保留已核原件的最完整引用。
+
+    参数：anchors 为本地、标题和正文的同公司年度见证。
+    返回：每个来源一次的有序锚。异常：ValueError 为同来源日期或 URL 冲突。
+    """
+    by_source: dict[str, HkAnnualAnchor] = {}
+    for anchor in anchors:
+        previous = by_source.get(anchor.source_id)
+        if previous is not None and (previous.end != anchor.end or previous.source_url != anchor.source_url):
+            raise ValueError("同一 HK 年度来源的截止日或 URL 冲突")
+        if previous is None or (anchor.body_facts is not None and previous.body_facts is None) or (
+            anchor.publication is not None and previous.publication is None):
+            by_source[anchor.source_id] = anchor
+    return tuple(by_source.values())
+
+
+def local_hk_annual_ends(entries: tuple[SourceMetaIntegrityReadEntry, ...], body_evidence: tuple[HkBodyEvidence, ...] = ()) -> dict[str, HkAnnualAnchor]:
     """从同窗原始来源与完整性分类取得可信年度证据。
 
-    参数：entries 为同一稳定根严格读取的元数据与完整性观察；可选分类缺失时只用主体标题。
+    参数：entries 为同一稳定根元数据与完整性观察，body_evidence 为已核原件的绑定事实；分类缺失只用主体标题。
     返回：可信同公司原始年度文档 ID 到直接截止日的映射。
     异常：必填来源文本缺失原样抛 KeyError；字段类型或文本非法抛 ValueError。"""
-    result: dict[str, date] = {}
+    result: dict[str, HkAnnualAnchor] = {}
     for entry in entries:
         meta = entry.source_meta
         if entry.integrity.status is not SourceIntegrityStatus.COMPLETE:
@@ -1133,7 +1182,30 @@ def local_hk_annual_ends(entries: tuple[SourceMetaIntegrityReadEntry, ...]) -> d
             raise ValueError("HK source_category must be text or null")
         category = category_value or hk_report_subject_title(title)
         if category is not None and (end := hk_annual_end_date(title=title, category_text=category)) is not None:
-            result[entry.document_id] = end
+            source_id = _hk_source_text(meta, "source_id")
+            source_url = _hk_source_text(meta, "source_url")
+            if entry.integrity.revision is None:
+                continue
+            result[entry.document_id] = HkAnnualAnchor(end, source_id, source_url,
+                CnReportPublication("hkexnews", source_id, entry.document_id, entry.integrity.revision))
+    for evidence in body_evidence:
+        publication = evidence.publication
+        if publication is None or evidence.facts.kind != "annual":
+            continue
+        entry = next((e for e in entries if e.document_id == publication.document_id), None)
+        if entry is None or entry.integrity.status is not SourceIntegrityStatus.COMPLETE or entry.integrity.revision != publication.revision:
+            continue
+        meta = entry.source_meta
+        if (meta.get("ticker") != evidence.ticker or meta.get("source_provider") != "hkexnews"
+            or meta.get("source_id") != evidence.source_id or meta.get("source_url") != evidence.source_url
+            or meta.get("pdf_sha256") != evidence.facts.pdf_sha256
+            or meta.get("ingest_method") != "download" or meta.get("is_deleted") is not False):
+            continue
+        facts = resolve_hk_report_period(title=_hk_source_text(meta, "source_title"),
+            category_text=_hk_source_text(meta, "source_category"), annual_ends=(), body=evidence)
+        if facts is not None:
+            result[publication.document_id] = HkAnnualAnchor(evidence.facts.end, evidence.source_id,
+                evidence.source_url, publication, evidence.facts)
     return result
 
 
@@ -1148,3 +1220,105 @@ def _hk_source_text(meta: Mapping[str, JsonValue], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"HK source {key} must be non-empty text")
     return value
+
+
+class HkEligibilityReason(str, Enum):
+    """正文获取准入的封闭原因，不能用 resolver None 代替。"""
+
+    SUFFICIENT = "title_sufficient"
+    MISSING = "missing_period_facts"
+    CONFLICT = "conflict_or_unsupported"
+    NON_TARGET = "non_target"
+
+
+@dataclass(frozen=True, slots=True)
+class HkBodyEligibility:
+    """selection 唯一生成的准入结果，运输方只消费 missing 分支。"""
+
+    state: Literal["confirmed", "missing", "blocked", "non_target"]
+    reason: HkEligibilityReason
+    source_id: str
+    projection: CnReportPeriodProjection | None
+
+
+def hk_body_eligibility(item: HkexnewsRawAnnouncement, annual_ends: tuple[date, ...]) -> HkBodyEligibility:
+    """封闭判定正文准入。
+
+    参数：item 为同窗去重 raw；annual_ends 为可信日历。返回：封闭判定及已校验性质。
+    异常：无。冲突、歧义、不支持与缺事实分开，已充分标题不请求正文。
+    """
+    if _is_english_hk_announcement(item) or not _has_hk_unresolved_report_signal(title=item.title, category_text=item.category_text):
+        return HkBodyEligibility("non_target", HkEligibilityReason.NON_TARGET, item.document_id, None)
+    facts = resolve_hk_report_period(title=item.title, category_text=item.category_text, annual_ends=annual_ends)
+    if facts is not None:
+        return HkBodyEligibility("confirmed", HkEligibilityReason.SUFFICIENT, item.document_id, facts.projection)
+    subject = hk_report_subject_title(item.title)
+    projection = _classify_hk_period_projection(title=subject, category_text=item.category_text, annual_ends=annual_ends) if subject is not None else None
+    # 只开放经过所有标题 guard 且确实缺少直接期间的 results；任何已有年份/截止日的未决都不能被正文冲洗。
+    if (subject is None or has_unresolved_end_date(subject)
+        or re.search(r"\d{4}\s*/\s*\d{2,4}(?![/\d])", subject)
+        or _hk_title_years(subject) or report_end_date(subject) is not None
+        or _hk_report_family(item.category_text) != "results" or projection is None
+        or projection.identity_period not in ("Q2", "Q4")):
+        return HkBodyEligibility("blocked", HkEligibilityReason.CONFLICT, item.document_id, None)
+    return HkBodyEligibility("missing", HkEligibilityReason.MISSING, item.document_id, projection)
+
+
+def hk_body_requests(query: CnReportQuery, announcements: tuple[HkexnewsRawAnnouncement, ...], annual_ends: tuple[HkAnnualAnchor, ...]) -> tuple[HkBodyRequest, ...]:
+    """仅输出携带封闭判定的同窗原件请求。
+
+    参数：query/raw/annual_ends 为发现输入。返回：允许取原件的来源。异常：同 key 冲突 ValueError。
+    """
+    scoped = tuple(item for item in _deduplicate_hk_announcements(announcements) if query.start_date <= item.filing_date <= query.end_date)
+    ends = tuple(sorted({anchor.end for anchor in annual_ends} | {end for item in scoped if (end := hk_annual_end_date(title=item.title, category_text=item.category_text)) is not None}))
+    return tuple(HkBodyRequest(item, decision) for item in scoped if (decision := hk_body_eligibility(item, ends)).state == "missing"
+                 and decision.projection is not None and decision.projection.identity_period in query.discovery_periods)
+
+
+@dataclass(frozen=True, slots=True)
+class HkBodyPeriodPartial:
+    """正文 owner 对未能分配财年/身份的直接日期判定。"""
+
+    report_date: date | None
+    reason: Literal["ineligible", "direct_fact_conflict", "fiscal_year_unconfirmed"]
+
+
+def resolve_hk_body_period_state(title: str, category: str, annual_ends: tuple[date, ...], body: HkBodyEvidence,
+    annual_anchors: tuple[HkAnnualAnchor, ...] = ()) -> HkPeriodResolution | HkBodyPeriodPartial:
+    """以同一准入和正文事实产生完整或部分期间状态，不进入标题季度回退。
+
+    参数：标题/分类/年度日期/本条正文/带引用年度锚。返回：完整结果或带原因的未决事实。异常：无。
+    """
+    raw = HkexnewsRawAnnouncement(body.source_id, title, body.source_url, body.ticker, category, "", "zh")
+    eligibility = hk_body_eligibility(raw, annual_ends)
+    if eligibility.state != "missing" or eligibility.projection is None or body.facts.ticker != body.ticker:
+        return HkBodyPeriodPartial(None, "ineligible")
+    end = body.facts.end
+    annual = body.facts.kind == "annual"
+    if end.day != calendar.monthrange(end.year, end.month)[1] or eligibility.projection.identity_period != ("Q4" if annual else "Q2"):
+        return HkBodyPeriodPartial(None, "direct_fact_conflict")
+    if annual:
+        return HkPeriodResolution(end.year, eligibility.projection, end.isoformat(), "source_document", "source_document")
+    mapped = fiscal_quarter_at(end, annual_ends)
+    if mapped is None or mapped[1] != 2:
+        return HkBodyPeriodPartial(end, "fiscal_year_unconfirmed")
+    nearby = relevant_annual_end_dates(end, annual_ends)
+    return HkPeriodResolution(mapped[0], eligibility.projection, end.isoformat(), "source_document", "source_document_and_annual_end",
+                              tuple(anchor for anchor in annual_anchors if anchor.end in nearby), nearby)
+
+
+@dataclass(frozen=True, slots=True)
+class HkReportSelection:
+    """尚未交接原件的纯业务选择结果；不冒充已校验 discovery。"""
+
+    candidates: tuple[CnReportCandidate, ...]
+    uncertain_reports: tuple[FinsDownloadUncertainReport, ...]
+    body_evidence: tuple[HkBodySelection, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class HkBodyRequest:
+    """已准入的raw/source key与业绩性质；downloader无需解释标题。"""
+
+    announcement: HkexnewsRawAnnouncement
+    eligibility: HkBodyEligibility

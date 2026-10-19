@@ -177,8 +177,8 @@ def test_supported_relation_is_independent_of_year_and_script(title: str, year: 
     异常：owner 未解析或事实漂移时断言失败。
     """
     facts = resolve_hk_report_period(title=title, category_text=_CATEGORY, annual_ends=())
-    assert facts is not None and facts[0] == year
-    assert facts[1].identity_period == "H1" and facts[1].covered_periods == ("H1",)
+    assert facts is not None and facts.fiscal_year == year
+    assert facts.projection.identity_period == "H1" and facts.projection.covered_periods == ("H1",)
 
 
 @pytest.mark.parametrize("reverse", (False, True))
@@ -219,8 +219,8 @@ def test_single_subject_connectors_preserve_owner_contract(
     """
     assert hk_report_subject_title(title) == title
     facts = resolve_hk_report_period(title=title, category_text=category, annual_ends=())
-    assert facts is not None and facts[0] == year
-    assert facts[1].identity_period == period and facts[1].covered_periods == coverage
+    assert facts is not None and facts.fiscal_year == year
+    assert facts.projection.identity_period == period and facts.projection.covered_periods == coverage
     direct = date.fromisoformat(end) if end is not None else None
     assert hk_report_end_date(title) == direct
     assert hk_annual_end_date(title=title, category_text=category) == (direct if period in {"FY", "Q4"} else None)
@@ -231,7 +231,7 @@ def test_single_subject_connectors_preserve_owner_contract(
     )
     assert not selected.uncertain_reports and len(selected.candidates) == 1
     candidate = selected.candidates[0]
-    assert candidate.fiscal_year == year and candidate.period_projection == facts[1]
+    assert candidate.fiscal_year == year and candidate.period_projection == facts.projection
     assert candidate.report_date == end and candidate.amended is amended
     assert (candidate.source_id, candidate.title, candidate.category_text, candidate.source_url, candidate.filing_date) == original
     assert (raw.document_id, raw.title, raw.category_text, raw.source_url, raw.filing_date) == original
@@ -358,7 +358,9 @@ def test_single_subject_local_rebuild_and_annual_evidence_agree(
     pipeline.batching_repository.commit_batch(batch)
     before, before_assets = _stored_sources(pipeline)
     annual = {entry.document_id: date.fromisoformat(end)} if period in {"FY", "Q4"} and end is not None else {}
-    assert local_hk_annual_ends(before) == annual
+    anchors = local_hk_annual_ends(before)
+    assert {key: anchor.end for key, anchor in anchors.items()} == annual
+    assert all(anchor.publication is not None and anchor.source_id and anchor.source_url for anchor in anchors.values())
     windows = (PeriodDownloadWindow(fiscal_period=period, start_date=_QUERY.start_date, end_date=_QUERY.end_date),)
     rows, unknown, cancelled = rebuild_hk_periods(pipeline, "9633", windows, None)
     assert not unknown and not cancelled and len(rows) == 1
@@ -623,4 +625,4 @@ def test_local_annual_subject_without_category_uses_same_scope(tmp_path: Path) -
     pipeline.batching_repository.commit_batch(batch)
     after, after_assets = _stored_sources(pipeline)
     assert after_assets == assets
-    assert local_hk_annual_ends(after) == {entry.document_id: date(2025, 12, 31)}
+    assert {key: anchor.end for key, anchor in local_hk_annual_ends(after).items()} == {entry.document_id: date(2025, 12, 31)}

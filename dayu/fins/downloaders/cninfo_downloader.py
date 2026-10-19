@@ -50,7 +50,9 @@ from dayu.fins.download_contract import (
 )
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol
 from dayu.fins.pipelines.cn_download_models import (
-    CnAnnualReportPdf,
+    HkAnnualAnchor,
+    HkBodyEvidence,
+    CnReportPdf,
     CnAnnualReportFacts,
     CnCompanyProfile,
     CnFiscalPeriod,
@@ -238,9 +240,10 @@ class CninfoDiscoveryClient:
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...],
-        local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...],
+        local_annual_ends: tuple[HkAnnualAnchor, ...],
+        local_report_pdfs: tuple[CnReportPdf, ...],
         pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (),
         cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """列出符合 ``query.discovery_periods`` 与窗口约束的候选报告。
@@ -256,7 +259,7 @@ class CninfoDiscoveryClient:
         Args:
             query: 单次 download 查询参数。
             profile: ``resolve_company`` 返回的公司元数据。
-            local_cn_annual_pdfs: 同窗 CN 年度原件；HK 必须为空。
+            local_report_pdfs: 同窗完整 CN FY 原件，不接受 HK 原件。
             pdf_download_gate: 年度远端原件 acquisition gate。
             local_annual_ends: 同公司可信本地年度截止日；CN 必须为空。
             cancellation_checkpoint: 可选 workflow-owned 无参取消检查点；
@@ -312,8 +315,8 @@ class CninfoDiscoveryClient:
                            and is_cninfo_report_title_admissible(item.title))
         if len({item.announcement_id for item in raw_by_period.get("FY", ())}) != len(raw_by_period.get("FY", ())):
             raise _cninfo_protocol_error("巨潮年度公告来源身份重复")
-        local = {(pdf.publication.provider, pdf.publication.source_id): pdf for pdf in local_cn_annual_pdfs}
-        if len(local) != len(local_cn_annual_pdfs):
+        local = {(pdf.publication.provider, pdf.publication.source_id): pdf for pdf in local_report_pdfs}
+        if len(local) != len(local_report_pdfs):
             raise ValueError("本地年度来源身份重复")
         facts: dict[str, CnAnnualReportFacts] = {}
         remote: dict[str, tuple[bytes, str]] = {}
@@ -353,9 +356,9 @@ class CninfoDiscoveryClient:
                 payload, acquired_at = remote[candidate.source_id]
                 prepared.append(DownloadedReportAsset(candidate, payload, _sha256_hex(payload), len(payload), acquired_at))
             else:
-                publications.append(local[("cninfo", candidate.source_id)].publication)
+                publications.append(local[("cninfo", candidate.source_id)])
         return CnReportDiscoveryResult(candidates=candidates, uncertain_reports=(),
-                                       prepared_assets=tuple(prepared), local_annual_publications=tuple(publications))
+                                       prepared_assets=tuple(prepared), local_publications=tuple(publications))
 
     def download_report_pdf(self, candidate: CnReportCandidate) -> DownloadedReportAsset:
         """下载单份候选 PDF 并返回强类型资产对象。

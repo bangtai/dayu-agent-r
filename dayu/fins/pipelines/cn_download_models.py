@@ -18,12 +18,17 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import date
 from dataclasses import dataclass
 from typing import Final, Literal, Optional, TypeAlias
 
 from dayu.fins.domain.document_models import SourceDocumentRevision
 from dayu.fins.domain.filing_semantics import FiscalPeriod
+from dayu.fins.pipelines.hk_fiscal_calendar import HkReportDateSource, fiscal_quarter_at
+from dayu.fins.pipelines.hk_body_facts import HkBodyFacts
 from dayu.fins.download_contract import FinsDownloadUncertainReport
+
+FiscalYearSource: TypeAlias = Literal["title_or_category_inferred", "source_document", "source_title_and_annual_end", "source_document_and_annual_end"]
 
 CnMarketKind = Literal["CN", "HK"]
 """CN 下载链路覆盖的市场标识。``ticker_normalization.NormalizedTicker.market``
@@ -218,8 +223,8 @@ class CnReportCandidate:
             ``DOC_ID``）。
         source_url: 直接可下载 PDF 的绝对 URL。
         title: 公告标题（用于诊断、白/黑名单匹配）。
-        category_text: 原始 provider 分类；缺少时为空。
-        report_date: 从原始标题识别的截止日；缺少时为 None。
+        category_text: 原始 provider 分类；缺少时为空。report_date_source 显式记录标题或正文来源。
+        report_date: 统一期间 owner 确认的直接截止日；缺少时为 None。
         language: 候选语言；副语言不入主 candidate。
         filing_date: 公告披露日期，``YYYY-MM-DD``。
         fiscal_year: 已确认财年。
@@ -239,7 +244,7 @@ class CnReportCandidate:
     language: CnLanguage
     filing_date: str
     fiscal_year: int
-    fiscal_year_source: Literal["title_or_category_inferred", "source_document"]
+    fiscal_year_source: FiscalYearSource
     period_projection: CnReportPeriodProjection
     amended: bool
     content_length: Optional[int]
@@ -248,6 +253,7 @@ class CnReportCandidate:
 
     category_text: str = ""
     report_date: str | None = None
+    report_date_source: HkReportDateSource = None
 
 
 @dataclass(frozen=True)
@@ -341,8 +347,8 @@ class DownloadedReportAsset:
 __all__ = [
     "CnReportDiscoveryResult",
     "CnAnnualReportFacts",
-    "CnAnnualReportPublication",
-    "CnAnnualReportPdf",
+    "CnReportPublication",
+    "CnReportPdf",
     "require_matching_cn_annual_asset",
     "CN_DOWNLOAD_NORMAL_TERMINAL_STATUSES",
     "CN_DOWNLOAD_TERMINAL_OK",
@@ -375,7 +381,9 @@ class CnReportDiscoveryResult:
     candidates: tuple[CnReportCandidate, ...]
     uncertain_reports: tuple[FinsDownloadUncertainReport, ...]
     prepared_assets: tuple[DownloadedReportAsset, ...]
-    local_annual_publications: tuple[CnAnnualReportPublication, ...]
+    local_publications: tuple[CnReportPdf, ...]
+    body_evidence: tuple[HkBodySelection, ...] = ()
+    company_ticker: str | None = None
 
     def __post_init__(self) -> None:
         """校验所选来源与同次资产、只读见证的唯一绑定。
@@ -390,16 +398,47 @@ class CnReportDiscoveryResult:
             key = (asset.candidate.provider, asset.candidate.source_id)
             if key in handed or key not in by_source:
                 raise ValueError("prepared 来源重复或未被选择")
-            require_matching_cn_annual_asset(by_source[key], asset)
+            if asset.candidate.provider == "cninfo":
+                require_matching_cn_annual_asset(by_source[key], asset)
+            elif asset.candidate != by_source[key]:
+                raise ValueError("正文资产候选不匹配")
             handed.add(key)
-        for publication in self.local_annual_publications:
+        evidence = {(e.evidence.source_id, e.evidence.source_url): e for e in self.body_evidence}
+        if len(evidence) != len(self.body_evidence):
+            raise ValueError("正文证据重复")
+        for local in self.local_publications:
+            publication = local.publication
             key = (publication.provider, publication.source_id)
             if key in handed or key not in by_source:
                 raise ValueError("本地见证来源重复或未被选择")
             candidate = by_source[key]
-            if candidate.provider != "cninfo" or candidate.period_projection.identity_period != "FY":
-                raise ValueError("本地见证仅允许 CN FY")
+            require_matching_report_original(candidate, local.pdf_bytes, local.source_url,
+                evidence.get((candidate.source_id, candidate.source_url)), self.company_ticker)
+            if publication.provider == "hkexnews":
+                match = evidence.get((candidate.source_id, candidate.source_url))
+                if match is None or match.evidence.publication != publication:
+                    raise ValueError("本地正文事实与 snapshot revision 不匹配")
             handed.add(key)
+        for candidate in self.candidates:
+            if candidate.provider == "hkexnews" and (
+                (candidate.fiscal_year_source in ("source_document", "source_document_and_annual_end"))
+                != (candidate.report_date_source == "source_document")
+            ):
+                raise ValueError("HK 正文财年来源与日期来源必须一致")
+            body = candidate.provider == "hkexnews" and candidate.report_date_source == "source_document"
+            match = evidence.pop((candidate.source_id, candidate.source_url), None)
+            if body:
+                if match is None or (candidate.provider, candidate.source_id) not in handed:
+                    raise ValueError("正文候选必须具有唯一证据及实际原件交接")
+                asset = next((a for a in self.prepared_assets if a.candidate == candidate), None)
+                if asset is not None:
+                    require_matching_hk_body_asset(candidate, asset, match, self.company_ticker)
+            elif (candidate.provider, candidate.source_id) in handed and candidate.provider == "hkexnews":
+                raise ValueError("HK 原件交接仅允许正文来源 results")
+            elif match is not None:
+                raise ValueError("非正文候选不得携带正文证据")
+        if evidence:
+            raise ValueError("正文证据未被选择")
 
 
 @dataclass(frozen=True, slots=True)
@@ -418,10 +457,10 @@ class CnAnnualReportFacts:
 
 
 @dataclass(frozen=True, slots=True)
-class CnAnnualReportPublication:
+class CnReportPublication:
     """已确认原件的 exact publication 只读见证，不授予写权限。"""
 
-    provider: Literal["cninfo"]
+    provider: CnSourceProvider
     source_id: str
     document_id: str
     revision: SourceDocumentRevision
@@ -432,21 +471,21 @@ class CnAnnualReportPublication:
             raise TypeError("来源身份必须为字符串")
         if not isinstance(self.revision, SourceDocumentRevision):
             raise TypeError("revision 必须为仓储版本")
-        if self.provider != "cninfo" or not self.source_id or not self.document_id:
+        if self.provider not in ("cninfo", "hkexnews") or not self.source_id or not self.document_id:
             raise ValueError("来源身份不能为空或跨 provider")
 
 
 @dataclass(frozen=True, slots=True)
-class CnAnnualReportPdf:
+class CnReportPdf:
     """同一 snapshot 的原件 bytes、实际 locator 与见证。"""
 
-    publication: CnAnnualReportPublication
+    publication: CnReportPublication
     source_url: str
     pdf_bytes: bytes
 
     def __post_init__(self) -> None:
         """校验原件输入。参数：无。返回：无。异常：TypeError/ValueError 为非法输入。"""
-        if not isinstance(self.publication, CnAnnualReportPublication):
+        if not isinstance(self.publication, CnReportPublication):
             raise TypeError("publication 类型非法")
         if type(self.source_url) is not str or type(self.pdf_bytes) is not bytes:
             raise TypeError("原件 locator/bytes 类型非法")
@@ -469,3 +508,117 @@ def require_matching_cn_annual_asset(candidate: CnReportCandidate, asset: Downlo
         raise ValueError("年度资产长度不匹配")
     if asset.sha256 != hashlib.sha256(asset.pdf_bytes).hexdigest() or not asset.downloaded_at:
         raise ValueError("年度资产摘要或取得时间不匹配")
+
+
+@dataclass(frozen=True, slots=True)
+class HkBodyEvidence:
+    """正文事实与本次规范公司、官方来源和 exact 原件的绑定。"""
+
+    ticker: str
+    source_id: str
+    source_url: str
+    facts: HkBodyFacts
+    publication: CnReportPublication | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class HkAnnualAnchor:
+    """可信年度截止日及其实际来源；正文见证只存于对应事实。"""
+
+    end: date
+    source_id: str
+    source_url: str
+    publication: CnReportPublication | None = None
+    body_facts: HkBodyFacts | None = None
+
+    def __post_init__(self) -> None:
+        """校验引用与事实一致。参数：无。返回：无。异常：ValueError 为不完整或错配引用。"""
+        if not self.source_id or not self.source_url:
+            raise ValueError("年度锚缺少实际来源引用")
+        if self.publication is not None and self.publication.source_id != self.source_id:
+            raise ValueError("年度锚 publication 来源错配")
+        if self.body_facts is not None and (self.body_facts.end != self.end or self.body_facts.kind != "annual"):
+            raise ValueError("年度锚正文见证与截止日错配")
+
+
+@dataclass(frozen=True, slots=True)
+class HkPeriodResolution:
+    """期间 owner 的统一结果，各消费者直接投影，不能重算来源。"""
+
+    fiscal_year: int
+    projection: CnReportPeriodProjection
+    report_date: str | None
+    report_date_source: HkReportDateSource
+    fiscal_year_source: FiscalYearSource
+    annual_evidence: tuple[HkAnnualAnchor, ...] = ()
+    annual_ends: tuple[date, ...] = ()
+
+
+def require_matching_report_original(
+    candidate: CnReportCandidate, pdf_bytes: bytes, source_url: str,
+    evidence: HkBodySelection | None, company_ticker: str | None,
+) -> None:
+    """原件交接唯一公共校验，供 discovery、skip 及提交复用。
+
+    参数：candidate 为所选结果；pdf_bytes/URL 为实际原件；evidence 为正文证据；company_ticker 为查询公司。
+    返回：无。异常：ValueError 为身份、事实、实际字节或来源不匹配。
+    """
+    if not pdf_bytes:
+        raise ValueError("实际原件不能为空")
+    if candidate.provider == "cninfo":
+        if candidate.period_projection.identity_period != "FY" or candidate.fiscal_year_source != "source_document":
+            raise ValueError("本地 CN 原件仅允许原文 FY")
+        return
+    if source_url != candidate.source_url:
+        raise ValueError("正文原件 URL 不匹配")
+    if evidence is None:
+        raise ValueError("正文候选缺少绑定证据")
+    resolution = evidence.resolution
+    if (candidate.fiscal_year != resolution.fiscal_year or candidate.period_projection != resolution.projection
+        or candidate.report_date != resolution.report_date or candidate.report_date_source != resolution.report_date_source
+        or candidate.fiscal_year_source != resolution.fiscal_year_source):
+        raise ValueError("candidate 与正文 resolution 不匹配")
+    bound = evidence.evidence
+    if (company_ticker is None or bound.ticker != company_ticker
+        or bound.facts.ticker != company_ticker or bound.source_id != candidate.source_id
+        or bound.source_url != source_url or candidate.report_date_source != "source_document"
+        or candidate.report_date != bound.facts.end.isoformat()
+        or hashlib.sha256(pdf_bytes).hexdigest() != bound.facts.pdf_sha256):
+        raise ValueError("正文身份、日期或实际原件摘要不匹配")
+    annual = bound.facts.kind == "annual"
+    projection = CnReportPeriodProjection("Q4", ("FY", "Q4")) if annual else CnReportPeriodProjection("Q2", ("H1", "Q2"))
+    source: FiscalYearSource = "source_document" if annual else "source_document_and_annual_end"
+    if candidate.period_projection != projection or candidate.fiscal_year_source != source:
+        raise ValueError("正文性质或来源不匹配")
+    if not annual and (
+        not resolution.annual_evidence
+        or {anchor.end for anchor in resolution.annual_evidence} != set(resolution.annual_ends)
+        or any(anchor.body_facts is not None and anchor.body_facts.ticker != company_ticker
+            for anchor in resolution.annual_evidence)
+    ):
+        raise ValueError("正文中期缺少与日历对应的年度来源见证")
+    if not annual and fiscal_quarter_at(bound.facts.end, resolution.annual_ends) != (candidate.fiscal_year, 2):
+        raise ValueError("正文中期没有一致的可信年度日历")
+    if annual and candidate.fiscal_year != bound.facts.end.year:
+        raise ValueError("正文年度不匹配")
+
+
+@dataclass(frozen=True, slots=True)
+class HkBodySelection:
+    """单条正文证据与 selection 统一结果的显式交接。"""
+
+    evidence: HkBodyEvidence
+    resolution: HkPeriodResolution
+
+
+def require_matching_hk_body_asset(candidate: CnReportCandidate, asset: DownloadedReportAsset,
+    evidence: HkBodySelection | None, company_ticker: str | None) -> None:
+    """校验正文prepared的全部运输事实并复用实际原件绑定。
+
+    参数：所选candidate、实际asset、绑定证据和查询公司。返回：无。异常：ValueError为任何错配。
+    """
+    if (asset.candidate != candidate or type(asset.pdf_bytes) is not bytes
+        or type(asset.content_length) is not int or asset.content_length != len(asset.pdf_bytes)
+        or asset.sha256 != hashlib.sha256(asset.pdf_bytes).hexdigest() or not asset.downloaded_at):
+        raise ValueError("正文资产候选、长度、摘要或取得时间不匹配")
+    require_matching_report_original(candidate, asset.pdf_bytes, candidate.source_url, evidence, company_ticker)

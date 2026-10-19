@@ -258,7 +258,7 @@ def _build_base_meta(
         "fiscal_period": candidate.period_projection.identity_period,
         "covered_fiscal_periods": list(candidate.period_projection.covered_periods),
         "fiscal_year_source": candidate.fiscal_year_source,
-        "report_date_source": hk_report_date_source(candidate.report_date) if candidate.provider == "hkexnews" else ("source_title" if candidate.report_date is not None else _REPORT_DATE_SOURCE),
+        "report_date_source": hk_report_date_source(candidate.report_date_source) if candidate.provider == "hkexnews" else ("source_title" if candidate.report_date is not None else _REPORT_DATE_SOURCE),
         "report_kind": candidate.period_projection.identity_period,
         "report_date": candidate.report_date,
         "filing_date": candidate.filing_date,

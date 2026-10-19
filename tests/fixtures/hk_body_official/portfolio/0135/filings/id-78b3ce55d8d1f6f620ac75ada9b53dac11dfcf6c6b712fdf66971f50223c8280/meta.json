@@ -1,0 +1,34 @@
+{
+  "ingest_method": "download",
+  "evidence_only": true,
+  "source_id": "12299283",
+  "source_url": "https://www1.hkexnews.hk/listedco/listconews/sehk/2026/0825/2026082502306_c.pdf",
+  "source_provider": "hkexnews",
+  "ticker": "0135",
+  "document_id": "official-12299283",
+  "source_kind": "filing",
+  "internal_document_id": "official-12299283",
+  "form_type": null,
+  "updated_at": "2026-10-18T21:02:51+00:00",
+  "created_at": "2026-10-18T21:02:51+00:00",
+  "first_ingested_at": "2026-10-18T21:02:51+00:00",
+  "is_deleted": false,
+  "deleted_at": null,
+  "document_version": "v1",
+  "source_fingerprint": "",
+  "primary_document": "2026082502306_c.pdf",
+  "files": [
+    {
+      "name": "2026082502306_c.pdf",
+      "uri": "local://0135/filings/id-78b3ce55d8d1f6f620ac75ada9b53dac11dfcf6c6b712fdf66971f50223c8280/2026082502306_c.pdf",
+      "etag": "d14c416c46963b2dfa8b4200d30cb6d706b107dd5a532c45d907265e1f40ea87",
+      "last_modified": "2026-10-18T21:02:51.614623+00:00",
+      "size": 925754,
+      "content_type": "application/pdf",
+      "sha256": "d14c416c46963b2dfa8b4200d30cb6d706b107dd5a532c45d907265e1f40ea87",
+      "ingested_at": "2026-10-18T21:02:51+00:00"
+    }
+  ],
+  "ingest_complete": true,
+  "_published_source_revision": "7f8fe1d8a5f443aa8889e9530a95ed94"
+}

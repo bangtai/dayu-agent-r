@@ -25,7 +25,7 @@ from dayu.fins.domain.document_models import SourceHandle
 from dayu.fins.domain.enums import SourceKind
 from dayu.fins.downloaders.cninfo_downloader import _parse_raw_announcement, JsonValue as ProviderJsonValue
 from dayu.fins.pipelines.cn_annual_report_facts import resolve_cn_annual_report_facts
-from dayu.fins.pipelines.cn_annual_report_source import project_cn_annual_report_original
+from dayu.fins.pipelines.report_original_source import project_report_original
 from dayu.fins.pipelines.cn_download_models import CnCompanyProfile, CnReportCandidate, CnReportPeriodProjection
 from dayu.fins.pipelines.cn_download_source_upsert import build_cn_file_entry, build_content_fingerprint, build_remote_fingerprint, commit_cn_filing_source_document
 from dayu.fins.pipelines.cn_form_utils import build_cn_filing_ids
@@ -40,7 +40,7 @@ _TARGETS = {'1213161683':2021,'1219815158':2023,'1223301988':2024}
 _SEEDS = ('1213161682','1223301999')
 _REPEAT_GETS = {'clean-repeat':{'1204545056','1209875597','1213161682','1223301999'},'seeded-repeat':{'1204545056','1209875597'}}
 _PRODUCTION = (
- 'dayu/fins/pipelines/cn_annual_report_facts.py','dayu/fins/pipelines/cn_annual_report_source.py',
+ 'dayu/fins/pipelines/cn_annual_report_facts.py','dayu/fins/pipelines/report_original_source.py',
  'dayu/fins/storage/source_integrity.py','dayu/fins/downloaders/cninfo_downloader.py','dayu/fins/downloaders/hkexnews_downloader.py',
  'dayu/fins/pipelines/cn_download_models.py','dayu/fins/pipelines/cn_download_protocols.py','dayu/fins/pipelines/cn_report_selection.py',
  'dayu/fins/pipelines/cn_download_identity.py','dayu/fins/pipelines/cn_download_workflow.py',
@@ -86,7 +86,7 @@ def source_records(base: Path, evidence_root: Path) -> dict[str, JsonValue]:
         with source.read_source_snapshot('601225',document_id,SourceKind.FILING,materialize_files=True) as snapshot:
             meta=snapshot.source_meta;sid=_text(meta['source_id'])
             if sid in records:raise ValueError('duplicate held source key')
-            original=project_cn_annual_report_original(snapshot)
+            original=project_report_original(snapshot)
             primary=tuple(d for d in snapshot.files if d.name==snapshot.primary_filename)
             declarations=meta['files'];assert isinstance(declarations,list)
             docling=tuple(_mapping(e) for e in declarations if _mapping(e).get('source')=='docling' and _mapping(e).get('name')==snapshot.primary_filename and _mapping(e).get('content_type')=='application/json')

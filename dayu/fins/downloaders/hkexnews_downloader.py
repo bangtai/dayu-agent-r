@@ -10,6 +10,7 @@ report selection helper；不依赖 storage/docling，也不生成 ``document_id
 
 from __future__ import annotations
 
+from functools import partial
 import hashlib
 import html
 import json
@@ -30,7 +31,7 @@ from dayu.fins.download_contract import (
 )
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol
 from dayu.fins.pipelines.cn_download_models import (
-    CnAnnualReportPdf,
+    CnReportPdf, HkAnnualAnchor, HkBodyEvidence,
     CnCompanyProfile,
     CnFiscalPeriod,
     CnLanguage,
@@ -41,6 +42,8 @@ from dayu.fins.pipelines.cn_download_models import (
     DownloadedReportAsset,
     HkexnewsRawAnnouncement,
 )
+from dayu.fins.pipelines.hk_body_facts import resolve_hk_body_facts, HkBodyFacts
+from dayu.fins.pipelines.cn_report_selection import hk_body_requests
 from dayu.fins.pipelines.cn_report_selection import select_hkexnews_report_candidates
 from dayu.fins._log import Log
 
@@ -276,9 +279,10 @@ class HkexnewsDiscoveryClient:
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...],
-        local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...],
+        local_annual_ends: tuple[HkAnnualAnchor, ...],
+        local_report_pdfs: tuple[CnReportPdf, ...],
         pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (),
         cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """列出符合窗口和财期的 HK 报告候选。
@@ -286,8 +290,8 @@ class HkexnewsDiscoveryClient:
         Args:
             query: 单次 download 查询参数。
             profile: ``resolve_company`` 返回的公司元数据。
-            local_cn_annual_pdfs: 同窗 CN 年度原件；HK 必须为空。
-            pdf_download_gate: 年度远端原件 acquisition gate。
+            local_report_pdfs: 本公司已发布完整正文来源的exact原件。
+            pdf_download_gate: 正文准入后的原件获取gate。
             local_annual_ends: 同公司可信本地年度截止日，可为空；与当前窗口远端年度证据合并。
             cancellation_checkpoint: 可选 workflow-owned 无参取消检查点；
                 每个 title search 累计 GET 前和成功响应后调用。
@@ -300,8 +304,8 @@ class HkexnewsDiscoveryClient:
             FinsDownloadProviderError: 任一有效财期来源请求或协议失败时抛出。
         """
 
-        if local_cn_annual_pdfs:
-            raise ValueError("HK discovery 不接受 CN 年度原件")
+        if any(p.publication.provider != "hkexnews" for p in local_report_pdfs):
+            raise ValueError("HK discovery 不接受跨 provider 原件")
         if query.market != "HK":
             raise ValueError(f"HkexnewsDiscoveryClient 仅支持 HK，收到 market={query.market!r}")
         if profile.provider != "hkexnews":
@@ -332,12 +336,62 @@ class HkexnewsDiscoveryClient:
                 cancellation_checkpoint=cancellation_checkpoint,
             )
             raw_announcements.extend(announcements)
-        return select_hkexnews_report_candidates(
+        local = {p.publication.source_id: p for p in local_report_pdfs}
+        if len(local) != len(local_report_pdfs):
+            raise ValueError("本地正文原件重复")
+        cached_facts = {e.source_id: e for e in local_body_evidence}
+        if len(cached_facts) != len(local_body_evidence) or any(key not in local for key in cached_facts):
+            raise ValueError("本地正文事实缺少唯一原件")
+        bodies: dict[str, HkBodyEvidence] = {}
+        remote: dict[str, tuple[bytes, str]] = {}
+        for request in hk_body_requests(query, tuple(raw_announcements), local_annual_ends):
+            item = request.announcement
+            _hk_body_checkpoint(cancellation_checkpoint)
+            cached = local.get(item.document_id)
+            if cached is not None:
+                if cached.source_url != item.source_url:
+                    raise ValueError("HK 本地原件 URL 与官方来源冲突")
+                payload = cached.pdf_bytes
+            else:
+                with pdf_download_gate.lease_for_provider("hkexnews", cancel_checker=partial(_hk_body_gate_cancelled, cancellation_checkpoint)):
+                    _hk_body_checkpoint(cancellation_checkpoint)
+                    payload = self._http_download_bytes(item.source_url)
+                    _hk_body_checkpoint(cancellation_checkpoint)
+                    if len(payload) < _PDF_MIN_BYTES or not payload.startswith(_PDF_MAGIC_BYTES):
+                        raise HkexnewsProviderProtocolError
+                    remote[item.document_id] = payload, _utc_now_isoformat()
+            known = cached_facts.get(item.document_id) if cached is not None else None
+            if known is not None and cached is not None:
+                if (known.publication != cached.publication or known.source_url != item.source_url
+                    or known.ticker != query.normalized_ticker
+                    or known.facts.pdf_sha256 != hashlib.sha256(payload).hexdigest()):
+                    raise ValueError("本地正文事实与实际原件不匹配")
+                facts = known.facts
+            else:
+                facts = resolve_hk_body_facts(payload, query.normalized_ticker, cancellation_checkpoint)
+            _hk_body_checkpoint(cancellation_checkpoint)
+            if isinstance(facts, HkBodyFacts):
+                bodies[item.document_id] = HkBodyEvidence(query.normalized_ticker, item.document_id, item.source_url, facts,
+                    cached.publication if cached is not None else None)
+        selection = select_hkexnews_report_candidates(
             query=query,
             announcements=tuple(raw_announcements),
             local_annual_ends=local_annual_ends,
             read_head_meta=self._http_head_meta,
+            body_evidence=bodies,
         )
+        prepared: list[DownloadedReportAsset] = []
+        publications: list[CnReportPdf] = []
+        for candidate in selection.candidates:
+            if candidate.report_date_source != "source_document":
+                continue
+            if candidate.source_id in remote:
+                payload, acquired_at = remote[candidate.source_id]
+                prepared.append(DownloadedReportAsset(candidate, payload, hashlib.sha256(payload).hexdigest(), len(payload), acquired_at))
+            else:
+                publications.append(local[candidate.source_id])
+        return CnReportDiscoveryResult(selection.candidates, selection.uncertain_reports, tuple(prepared), tuple(publications),
+                                        selection.body_evidence, query.normalized_ticker)
 
     def download_report_pdf(self, candidate: CnReportCandidate) -> DownloadedReportAsset:
         """下载单份 HK PDF 并返回资产对象。
@@ -1283,3 +1337,15 @@ __all__ = [
     "HKEXNEWS_TITLE_SEARCH_URL",
     "HkexnewsDiscoveryClient",
 ]
+
+
+def _hk_body_checkpoint(checkpoint: Callable[[], None] | None) -> None:
+    """观察取消。参数：checkpoint 为Host控制点。返回：无。异常：取消原样传播。"""
+    if checkpoint is not None:
+        checkpoint()
+
+
+def _hk_body_gate_cancelled(checkpoint: Callable[[], None] | None) -> bool:
+    """下载gate取消观察。参数：Host检查点。返回：未取消为False。异常：取消透传。"""
+    _hk_body_checkpoint(checkpoint)
+    return False

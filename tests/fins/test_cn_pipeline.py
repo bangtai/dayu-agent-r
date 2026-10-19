@@ -1,7 +1,8 @@
 """CnPipeline download facade 行为测试。"""
 from __future__ import annotations
+from dayu.fins.pipelines.cn_download_models import HkAnnualAnchor, HkBodyEvidence
 from tests.fins.test_cn_annual_report_facts import build_synthetic_annual_pdf
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import CnReportPdf
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol, NoopCnDownloadPdfGate
 
 from dayu.fins.storage import FsBatchingRepository, FsCompanyMetaRepository, FsSourceDocumentRepository, FsDocumentBlobRepository, FsFilingMaintenanceRepository, FsFilingUploadStateRepository, FsProcessedDocumentRepository
@@ -361,8 +362,8 @@ class _PipelineDownloadFakeDiscoveryClient:
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回一份固定 FY 候选。
 
@@ -398,7 +399,7 @@ class _PipelineDownloadFakeDiscoveryClient:
                 last_modified="Wed, 01 Apr 2026 00:00:00 GMT",
             ),
         )
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=self.candidates if self.candidates is not None else default_candidates, uncertain_reports=())
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=self.candidates if self.candidates is not None else default_candidates, uncertain_reports=())
 
     def download_report_pdf(self, candidate: CnReportCandidate) -> DownloadedReportAsset:
         """返回内存 PDF 资产。
@@ -457,8 +458,8 @@ class _PipelineDownloadFakeHkDiscoveryClient:
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回一份固定 HK FY 候选。
 
@@ -478,7 +479,7 @@ class _PipelineDownloadFakeHkDiscoveryClient:
         self.cancellation_checkpoints.append(cancellation_checkpoint)
         if cancellation_checkpoint is not None:
             cancellation_checkpoint()
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=(
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=(
             CnReportCandidate(fiscal_year_source="title_or_category_inferred",
                 provider="hkexnews",
                 source_id="HK1",

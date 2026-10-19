@@ -27,7 +27,9 @@ from typing import Optional, Protocol
 
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol
 from dayu.fins.pipelines.cn_download_models import (
-    CnAnnualReportPdf,
+    CnReportPdf,
+    HkAnnualAnchor,
+    HkBodyEvidence,
     CnCompanyProfile,
     CnReportCandidate,
     CnReportDiscoveryResult,
@@ -85,9 +87,10 @@ class CnReportDiscoveryClientProtocol(Protocol):
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...],
-        local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...],
+        local_annual_ends: tuple[HkAnnualAnchor, ...],
+        local_report_pdfs: tuple[CnReportPdf, ...],
         pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (),
         cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """列出符合 ``discovery_periods`` 与窗口约束的候选报告。
@@ -99,7 +102,7 @@ class CnReportDiscoveryClientProtocol(Protocol):
         Args:
             query: 单次 download 的查询参数。
             profile: ``resolve_company`` 返回的公司元数据。
-            local_cn_annual_pdfs: 同窗 CN 年度原件；HK 必须为空。
+            local_report_pdfs: CN FY 或 HK 正文 results 的同版原件；不跨 provider。
             pdf_download_gate: 年度远端原件 acquisition gate。
             local_annual_ends: 同公司可信本地年度截止日；CN 必须为空。
             cancellation_checkpoint: 可选 workflow-owned 无参取消检查点；

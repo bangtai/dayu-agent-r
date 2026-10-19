@@ -6,7 +6,7 @@
 """
 
 from __future__ import annotations
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import CnReportPdf
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol, NoopCnDownloadPdfGate
 
 import hashlib
@@ -475,7 +475,7 @@ def test_list_report_candidates_gets_title_search_and_builds_absolute_url() -> N
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     client = _build_client(handler)
-    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert len(candidates) == 1
     candidate = candidates[0]
@@ -516,7 +516,7 @@ def test_list_report_candidates_accepts_exact_100_complete_with_ordered_checkpoi
         _query(),
         _profile(),
         cancellation_checkpoint=checkpoint,
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert events[:3] == ["CP1", "GET(100)", "CP2"]
     assert checkpoint.call_count == 2
@@ -560,7 +560,7 @@ def test_list_report_candidates_fetches_two_round_cumulative_snapshot_with_invar
         _query(),
         _profile(),
         cancellation_checkpoint=checkpoint,
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert events[:6] == ["CP1", "GET(100)", "CP2", "CP3", "GET(200)", "CP4"]
     assert [params["rowRange"] for params in requested] == [("100",), ("200",)]
@@ -610,7 +610,7 @@ def test_list_report_candidates_uses_latest_record_count_for_next_range_and_grow
             return httpx.Response(200, headers={})
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
-    candidates = _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert ranges == [100, 200, 400]
     assert len(candidates) == 1
@@ -647,7 +647,7 @@ def test_list_report_candidates_uses_record_count_when_larger_than_doubled_range
             return httpx.Response(200, headers={})
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
-    _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert ranges == [100, 350]
 
@@ -680,7 +680,7 @@ def test_list_report_candidates_replaces_overlapping_snapshot_and_accepts_termin
             return httpx.Response(200, headers={})
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
-    candidates = _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [candidate.source_id for candidate in candidates] == ["FINAL_ONLY_0"]
     assert len(head_urls) == 1
@@ -709,7 +709,7 @@ def test_list_report_candidates_rejects_continuation_without_loaded_progress() -
         raise AssertionError("no HEAD or additional request is allowed")
 
     with pytest.raises(HkexnewsProviderProtocolError) as exc_info:
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.PROTOCOL
     assert exc_info.value.retryable is False
@@ -730,7 +730,7 @@ def test_list_report_candidates_requires_all_official_fields(missing_field: str)
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError):
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 @pytest.mark.parametrize("invalid_value", ["true", 1, None, [], {}])
@@ -744,7 +744,7 @@ def test_list_report_candidates_requires_exact_has_next_bool(invalid_value: Json
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError):
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 @pytest.mark.parametrize("field_name", ["rowRange", "loadedRecord", "recordCnt"])
@@ -762,7 +762,7 @@ def test_list_report_candidates_requires_exact_count_ints(
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError):
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 @pytest.mark.parametrize("field_name", ["rowRange", "loadedRecord", "recordCnt"])
@@ -776,7 +776,7 @@ def test_list_report_candidates_rejects_negative_count_fields(field_name: str) -
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError):
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 @pytest.mark.parametrize("invalid_result", [[], "", "{", "{}", "[1]"])
@@ -792,7 +792,7 @@ def test_list_report_candidates_requires_stringified_object_list(
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError):
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 @pytest.mark.parametrize(
@@ -821,7 +821,7 @@ def test_list_report_candidates_rejects_same_round_contradictions(
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError):
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
 
 @pytest.mark.parametrize(
@@ -867,7 +867,7 @@ def test_list_report_candidates_preserves_cancel_identity_and_suppresses_publica
             _query(),
             _profile(),
             cancellation_checkpoint=checkpoint,
-         local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+         local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value is expected
     assert events == expected_events
@@ -896,7 +896,7 @@ def test_list_report_candidates_preserves_non_cancel_failure_identity() -> None:
             _query(),
             _profile(),
             cancellation_checkpoint=checkpoint,
-         local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+         local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert type(exc_info.value) is RuntimeError
     assert exc_info.value is expected
@@ -914,7 +914,7 @@ def test_list_report_candidates_preserves_provider_protocol_error_and_direct_cau
         return httpx.Response(200, json=payload)
 
     with pytest.raises(HkexnewsProviderProtocolError) as exc_info:
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
 
@@ -949,7 +949,7 @@ def test_list_report_candidates_preserves_provider_protocol_object_identity(
         return httpx.Response(200, json=_title_search_payload([]))
 
     with pytest.raises(HkexnewsProviderProtocolError) as exc_info:
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value is expected
     assert exc_info.value.__cause__ is original
@@ -982,7 +982,7 @@ def test_list_report_candidates_discards_partial_rows_when_later_http_fails() ->
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     with pytest.raises(FinsDownloadProviderError) as exc_info:
-        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+        _build_client(handler).list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.source is FinsDownloadSource.HKEXNEWS
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.HTTP_STATUS
@@ -1029,7 +1029,7 @@ def test_list_report_candidates_keeps_cumulative_state_isolated_per_language() -
         max_retries=2,
         sleep_func=lambda _delay: None,
     )
-    client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert ranges_by_language == {"zh": [100, 200], "E": [100, 200]}
 
@@ -1071,7 +1071,7 @@ def test_captured_official_title_search_shape_replays_through_strict_owner() -> 
         discovery_periods=("FY",),
     )
 
-    assert _build_client(handler).list_report_candidates(query, _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates == ()
+    assert _build_client(handler).list_report_candidates(query, _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates == ()
 
 
 def test_list_report_candidates_does_not_use_english_fallback_when_primary_empty() -> None:
@@ -1098,7 +1098,7 @@ def test_list_report_candidates_does_not_use_english_fallback_when_primary_empty
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     client = _build_client(handler)
-    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
 
@@ -1126,7 +1126,7 @@ def test_list_report_candidates_filters_english_title_from_primary_language() ->
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     client = _build_client(handler)
-    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
 
@@ -1154,7 +1154,7 @@ def test_list_report_candidates_filters_english_title_with_chinese_category() ->
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     client = _build_client(handler)
-    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
 
@@ -1181,7 +1181,7 @@ def test_list_report_candidates_maps_hk_period_codes_and_allows_empty_quarters()
     candidates = client.list_report_candidates(
         _query(periods=("FY", "H1", "Q1", "Q2", "Q3", "Q4")),
         _profile(),
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert candidates == ()
     assert category_params == [
@@ -1226,7 +1226,7 @@ def test_list_report_candidates_raises_on_failed_hk_period_query() -> None:
         client.list_report_candidates(
             _query(periods=("FY", "H1")),
             _profile(),
-         local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+         local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert exc_info.value.transport_category is FinsDownloadTransportCategory.HTTP_STATUS
     assert exc_info.value.retryable is True
@@ -1266,7 +1266,7 @@ def test_list_report_candidates_maps_direct_q2_to_quarterly_category() -> None:
     candidates = client.list_report_candidates(
         _query(periods=("Q2",)),
         _profile(),
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert seen_t2codes == ["-2"]
     assert len(candidates) == 1
@@ -1323,7 +1323,7 @@ def test_list_report_candidates_keeps_q4_distinct_from_fy() -> None:
     candidates = client.list_report_candidates(
         _query(periods=("FY", "Q4")),
         _profile(),
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [(candidate.source_id, candidate.period_projection.identity_period) for candidate in candidates] == [
         ("FY_2025", "FY"),
@@ -1363,7 +1363,7 @@ def test_list_report_candidates_treats_traditional_half_year_as_h1() -> None:
     candidates = client.list_report_candidates(
         _query(periods=("FY", "H1")),
         _profile(),
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [(candidate.source_id, candidate.period_projection.identity_period) for candidate in candidates] == [
         ("H1_2025", "H1"),
@@ -1413,7 +1413,7 @@ def test_list_report_candidates_filters_q1_q3_by_title_period() -> None:
     candidates = client.list_report_candidates(
         _query(periods=("Q1", "Q3")),
         _profile(),
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [(candidate.source_id, candidate.period_projection.identity_period) for candidate in candidates] == [
         ("Q1_2024", "Q1"),
@@ -1480,7 +1480,7 @@ def test_list_report_candidates_reads_hk_quarterly_results_announcements() -> No
     candidates = client.list_report_candidates(
         _query(periods=("Q1", "Q2", "Q3", "Q4")),
         _profile(),
-     local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+     local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [(candidate.source_id, candidate.period_projection.identity_period) for candidate in candidates] == [
         ("Q1_2025", "Q1"),
@@ -1534,7 +1534,7 @@ def test_list_report_candidates_groups_by_year_and_prefers_amended() -> None:
         raise AssertionError(f"unexpected request {request.method} {request.url}")
 
     client = _build_client(handler)
-    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_cn_annual_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
+    candidates = client.list_report_candidates(_query(), _profile(), local_annual_ends=(), local_report_pdfs=(), pdf_download_gate=NoopCnDownloadPdfGate(), ).candidates
 
     assert [candidate.fiscal_year for candidate in candidates] == [2024, 2023]
     assert [candidate.source_id for candidate in candidates] == [

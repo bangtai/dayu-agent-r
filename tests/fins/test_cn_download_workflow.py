@@ -1,8 +1,9 @@
 """CN/HK download workflow 单元测试。"""
 
 from __future__ import annotations
+from dayu.fins.pipelines.cn_download_models import HkAnnualAnchor, HkBodyEvidence
 from tests.fins.test_cn_annual_report_facts import build_synthetic_annual_pdf
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import CnReportPdf
 from dayu.fins.pipelines.cn_download_protocols import CnReportDiscoveryClientProtocol
 from dayu.fins.pipelines.cn_download_pdf_gate import CnDownloadPdfGateProtocol, NoopCnDownloadPdfGate
 
@@ -20,6 +21,7 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from pathlib import Path
+from threading import Event
 from types import TracebackType
 from typing import BinaryIO, Literal, Optional, cast
 
@@ -442,8 +444,8 @@ class _FakeDiscoveryClient:
         query: CnReportQuery,
         profile: CnCompanyProfile,
         *,
-        local_annual_ends: tuple[date, ...], local_cn_annual_pdfs: tuple[CnAnnualReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
-        cancellation_checkpoint: Callable[[], None] | None = None,
+        local_annual_ends: tuple[HkAnnualAnchor, ...], local_report_pdfs: tuple[CnReportPdf, ...], pdf_download_gate: CnDownloadPdfGateProtocol,
+        local_body_evidence: tuple[HkBodyEvidence, ...] = (), cancellation_checkpoint: Callable[[], None] | None = None,
     ) -> CnReportDiscoveryResult:
         """返回测试候选。
 
@@ -468,7 +470,7 @@ class _FakeDiscoveryClient:
             except RuntimeError as exc:
                 self.checkpoint_errors.append(exc)
                 raise
-        return CnReportDiscoveryResult(prepared_assets=(), local_annual_publications=(), candidates=self.candidates, uncertain_reports=())
+        return CnReportDiscoveryResult(prepared_assets=(), local_publications=(), candidates=self.candidates, uncertain_reports=())
 
     def download_report_pdf(self, candidate: CnReportCandidate) -> DownloadedReportAsset:
         """返回内存 PDF 下载资产。
@@ -1142,7 +1144,7 @@ async def _collect_single_filing_events_async(
     """
 
     events: list[DownloadEvent] = []
-    async for event in _cn_download_filing_workflow.run_cn_download_single_filing_stream(prepared_asset=None, local_annual_publication=None,
+    async for event in _cn_download_filing_workflow.run_cn_download_single_filing_stream(prepared_asset=None, local_publication=None,
         batching_repository=pipeline.batching_repository,
         source_repository=pipeline.source_repository,
         blob_repository=pipeline.blob_repository,
@@ -4203,7 +4205,7 @@ def test_cn_inner_generator_close_before_conversion_leaves_no_document(tmp_path:
 
         stream = cast(
             AsyncGenerator[DownloadEvent, None],
-            _cn_download_filing_workflow.run_cn_download_single_filing_stream(prepared_asset=None, local_annual_publication=None,
+            _cn_download_filing_workflow.run_cn_download_single_filing_stream(prepared_asset=None, local_publication=None,
                 batching_repository=batching_repository,
                 source_repository=source_repository,
                 blob_repository=blob_repository,
@@ -5113,7 +5115,7 @@ def test_hk_direct_cancel_and_checker_error_precede_identity_read(tmp_path: Path
 
 
 from collections.abc import Mapping
-from dayu.fins.pipelines.cn_download_models import CnAnnualReportPublication, CnAnnualReportPdf
+from dayu.fins.pipelines.cn_download_models import CnReportPublication, CnReportPdf
 from dayu.fins.pipelines.cn_annual_report_facts import resolve_cn_annual_report_facts
 from dayu.fins.pipelines.cn_download_filing_workflow import CnDownloadAnnualPublicationError, _require_matching_cn_annual_publication
 from tests.fins.test_cninfo_downloader import _official_discovery_client, _official_rows
@@ -5121,7 +5123,7 @@ from tests.fins.test_cn_annual_report_facts import FIXTURES
 from dayu.fins.downloaders.cninfo_downloader import _parse_raw_announcement
 
 
-async def _annual_single(pipeline: CnPipeline,candidate: CnReportCandidate,prepared: DownloadedReportAsset | None,witness: CnAnnualReportPublication | None) -> list[DownloadEvent]:
+async def _annual_single(pipeline: CnPipeline,candidate: CnReportCandidate,prepared: DownloadedReportAsset | None,witness: CnReportPdf | None) -> list[DownloadEvent]:
     """参数：真实仓储宿主、所选candidate、两种显式handoff。返回：单filing事件。异常：owner原错误。"""
     return [event async for event in _cn_download_filing_workflow.run_cn_download_single_filing_stream(
         batching_repository=pipeline.batching_repository,source_repository=pipeline.source_repository,
@@ -5129,7 +5131,7 @@ async def _annual_single(pipeline: CnPipeline,candidate: CnReportCandidate,prepa
         discovery_client=pipeline.cn_discovery_client,pdf_download_gate=pipeline.pdf_download_gate,
         docling_conversion_runner=pipeline.docling_conversion_runner,ticker='600519',
         profile=CnCompanyProfile('cninfo','CNINFO:test','测试公司','600519'),candidate=candidate,
-        prepared_asset=prepared,local_annual_publication=witness,overwrite=False,cancel_checker=None,module='TEST')]
+        prepared_asset=prepared,local_publication=witness,overwrite=False,cancel_checker=None,module='TEST')]
 
 
 def _annual_asset(candidate: CnReportCandidate,payload: bytes) -> DownloadedReportAsset:
@@ -5224,7 +5226,7 @@ def test_local_witness_changed_aborts_not_retry(tmp_path: Path,monkeypatch: pyte
     candidate=_candidate();discovery=_FakeDiscoveryClient(tmp_path,(candidate,));converter=_FakeConverter();pipeline=_build_pipeline(tmp_path=tmp_path,discovery=discovery,converter=converter)
     docid=_seed_annual_owner(pipeline,candidate,build_synthetic_annual_pdf());entry=pipeline.source_repository.read_source_meta_integrity_view('600519',SourceKind.FILING,batch=None)[0]
     assert entry.integrity.revision is not None
-    witness=CnAnnualReportPublication('cninfo','A1',docid,entry.integrity.revision)
+    witness=CnReportPdf(CnReportPublication('cninfo','A1',docid,entry.integrity.revision), candidate.source_url, build_synthetic_annual_pdf())
     integrity=entry.integrity
     if condition=='repair':integrity=replace(integrity,status=SourceIntegrityStatus.REPAIR_REQUIRED,reasons=(SourceIntegrityReason.SIZE_MISMATCH,))
     elif condition=='revision':integrity=replace(integrity,revision=SourceDocumentRevision('new'))
@@ -5367,3 +5369,41 @@ def test_official_summary_preservation_and_selected_repair(tmp_path: Path,source
         else:
             assert gets.count(source_id)==1 and pdf_path.read_bytes()==original
             assert pipeline.source_repository.classify_source_integrity('601225',docid,SourceKind.FILING).status is SourceIntegrityStatus.COMPLETE
+def test_local_hk_preflight_keeps_loop_responsive_and_owns_thread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """本地前置读取在线程中运行，双重取消后仍待线程结束。
+
+    参数：tmp_path 为隔离仓储；monkeypatch 为受控线程交互。
+    返回：无。异常：loop 被堵或线程早退断言失败。
+    """
+    pipeline = _build_pipeline(tmp_path=tmp_path,
+        discovery=_FakeDiscoveryClient(temp_dir=tmp_path, candidates=()), converter=_FakeConverter())
+    started, release = Event(), Event()
+
+    def read_inputs(ticker: str, repository: SourceDocumentRepositoryProtocol,
+        checkpoint: Callable[[], None] | None,
+    ) -> tuple[tuple[CnReportPdf, ...], tuple[HkAnnualAnchor, ...], tuple[HkBodyEvidence, ...]]:
+        """占用真实线程直到测试释放。参数：公司、仓储、取消点。返回：空输入。异常：无。"""
+        started.set()
+        release.wait(2)
+        return (), (), ()
+
+    monkeypatch.setattr(_cn_download_workflow, "_read_local_hk_inputs", read_inputs)
+
+    async def run() -> None:
+        """确认 loop 继续调度并测试取消收口。参数：无。返回：无。异常：断言失败。"""
+        task = asyncio.create_task(_cn_download_workflow._load_local_hk_inputs(
+            "0135", pipeline.source_repository, None))
+        assert await asyncio.to_thread(started.wait, 1)
+        await asyncio.sleep(.02)
+        assert not task.done()
+        task.cancel()
+        task.cancel()
+        await asyncio.sleep(.02)
+        assert not task.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(run())
