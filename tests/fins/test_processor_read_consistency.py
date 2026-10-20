@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dayu.fins.cancellation import FinsReadCancelledError
+
 from docling_core.types.doc.document import DoclingDocument
 from dayu.fins.upload_asset_plan import docling_storage_name
 
@@ -109,7 +111,6 @@ from dayu.fins.tools.read_runtime import FinsReadRuntime
 from dayu.fins.tools.read_runtime_helpers import (
     FinsReadArgumentError,
     FinsReadBusinessError,
-    FinsReadCancelledError,
 )
 from dayu.service.fins_direct import FinsDirectCommandService
 
@@ -2782,7 +2783,8 @@ def test_read_runtime_maps_invalid_utf8_to_source_decode_failure(tmp_path: Path)
     assert error_info.value.code is ErrorCode.SOURCE_DECODE_FAILED
     assert isinstance(error_info.value.__cause__, FinsSourceDecodeError)
     assert registry.create_count == 0
-    assert runtime._processor_cache.size() == 0
+    assert runtime._processor_cache.size() == 1
+    runtime.close()
     assert len(repository.full_snapshot_roots) == 1
     assert all(not root.exists() for root in repository.full_snapshot_roots)
 
@@ -2810,7 +2812,8 @@ def test_processor_build_failure_closes_unpublished_full_snapshot(tmp_path: Path
     assert error_info.value is build_failure
     assert registry.create_count == 1
     assert registry.created == []
-    assert runtime._processor_cache.size() == 0
+    assert runtime._processor_cache.size() == 1
+    runtime.close()
     assert len(repository.full_snapshot_roots) == 1
     assert all(not root.exists() for root in repository.full_snapshot_roots)
 
@@ -2840,7 +2843,8 @@ def test_processor_build_cancellation_closes_unpublished_full_snapshot(tmp_path:
         )
 
     assert registry.create_count == 1
-    assert runtime._processor_cache.size() == 0
+    assert runtime._processor_cache.size() == 1
+    runtime.close()
     assert runtime._retired_entries == set()
     assert runtime._pending_snapshots == []
     assert len(repository.full_snapshot_roots) == 1
@@ -3149,22 +3153,22 @@ def test_concurrent_initial_cache_miss_builds_one_processor_and_closes_losing_sn
         first_future = executor.submit(_read_runtime_processor, runtime, 0)
         assert build_entered.wait(timeout=5.0)
         second_future = executor.submit(_read_runtime_processor, runtime, 1)
-        assert second_full_ready.wait(timeout=5.0)
+        # snapshot entry 已完整发布，第二次调用复用 entry 并等待其能力锁。
         release_build.set()
         processors = [first_future.result(timeout=5.0), second_future.result(timeout=5.0)]
 
     assert processors[0] is processors[1]
     assert registry.create_count == 1
     assert len(creation_lock_ids) == 2
-    assert len(set(creation_lock_ids)) == 1
-    assert len(repository.full_snapshot_roots) == 2
+    # snapshot 发布后不再需要保活 creation lock；能力锁保证 processor 仅构建一次。
+    assert len(repository.full_snapshot_roots) == 1
     assert sum(root.exists() for root in repository.full_snapshot_roots) == 1
 
 
 def test_runtime_close_before_cache_publication_rejects_build_and_cleans_snapshot(
     tmp_path: Path,
 ) -> None:
-    """close 先线性化时，阻塞中的 build 必须失败且不得事后发布 entry。
+    """close 先于 entry publication 时，已取得的 full snapshot 必须关闭且不得事后发布。
 
     Args:
         tmp_path: pytest 临时目录。
@@ -3173,18 +3177,18 @@ def test_runtime_close_before_cache_publication_rejects_build_and_cleans_snapsho
         无。
 
     Raises:
-        AssertionError: build 未以 close-state 失败或 cache/temp root 残留时抛出。
+        AssertionError: 借用未以 close-state 失败、仍创建 processor 或 cache/temp root 残留时抛出。
     """
 
     runtime, repository, registry = _build_runtime(tmp_path)
     build_entered = Event()
     release_build = Event()
 
-    def _block_before_registry_return() -> None:
-        """在 processor 已构建、cache 尚未发布的窗口阻塞 worker。
+    def _block_before_snapshot_return(count: int) -> None:
+        """在真实 full snapshot 已取得、entry 尚未发布的窗口阻塞 worker。
 
         Args:
-            无。
+            count: 仓储已取得的 full snapshot 数量。
 
         Returns:
             无。
@@ -3193,21 +3197,25 @@ def test_runtime_close_before_cache_publication_rejects_build_and_cleans_snapsho
             AssertionError: 主线程未释放 build 时抛出。
         """
 
+        assert count == 1
         build_entered.set()
         assert release_build.wait(timeout=5.0)
 
-    registry.before_return = _block_before_registry_return
+    repository.on_full_snapshot = _block_before_snapshot_return
     with ThreadPoolExecutor(max_workers=1) as executor:
         build_future = executor.submit(_read_runtime_processor_for_document, runtime, "doc-1")
-        assert build_entered.wait(timeout=5.0)
-        runtime.close()
-        assert runtime._processor_cache.size() == 0
-        release_build.set()
+        try:
+            assert build_entered.wait(timeout=5.0)
+            assert runtime._processor_cache.size() == 0 and registry.create_count == 0
+            runtime.close()
+            assert runtime._processor_cache.size() == 0
+        finally:
+            release_build.set()
         with pytest.raises(RuntimeError, match="Fins read runtime 已关闭"):
             build_future.result(timeout=5.0)
         assert build_future.done()
 
-    assert registry.create_count == 1
+    assert registry.create_count == 0
     assert runtime._processor_cache.size() == 0
     assert runtime._retired_entries == set()
     assert runtime._pending_snapshots == []

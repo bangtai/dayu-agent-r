@@ -47,6 +47,7 @@ _PRODUCER_PATHS = (
     "dayu/fins/pipelines/sec_download_source_upsert.py",
 )
 # 只观察 transport 与原指纹函数；fault 仅改变 exact 图片 GET 的远端响应。
+# package_version 仅记录运行环境按路径解析的 metadata，不证明 baseline 源码版本或安装成功。
 _OBSERVER_SCRIPT = '''"""临时真实验证 transport/descriptor 观测器，不改变生产结果。"""
 from __future__ import annotations
 import importlib.metadata
@@ -341,7 +342,6 @@ def _run_cli(context: _Context, year: str, accession: str, mode: str, base: Path
     assert len(origins) == 1
     origin = origins[0]
     assert origin["download_version"] == (_OLD_VERSION if baseline else SEC_PIPELINE_DOWNLOAD_VERSION)
-    assert origin["package_version"] == "0.1.4"
     expected_root = context.baseline if baseline else _REPO
     assert origin["code_root"] == str(expected_root)
     producer_origins = _mapping(origin["producer_origins"])

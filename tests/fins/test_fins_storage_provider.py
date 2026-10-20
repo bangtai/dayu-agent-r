@@ -28,6 +28,7 @@ from docling_core.types.doc.labels import DocItemLabel
 import pytest
 
 from tests.fins.company_meta_test_support import stage_company_meta_fixture
+from tests.fins.test_original_read_runtime import publish_original
 
 import dayu.fins.storage._fs_source_snapshot as source_snapshot_module
 from dayu.contracts.cancellation import CancellationToken
@@ -108,7 +109,8 @@ from dayu.fins.tools.error_contract import ErrorCode
 from dayu.fins.tools.fins_tools import build_fins_read_tool_definitions
 from dayu.fins.tools.provider import discover_tools
 from dayu.fins.tools.read_runtime import FinsReadRuntime
-from dayu.fins.tools.read_runtime_helpers import FinsReadBusinessError, FinsReadCancelledError
+from dayu.fins.tools.read_runtime_helpers import FinsReadBusinessError
+from dayu.fins.cancellation import FinsReadCancelledError
 from dayu.fins.tools.result_types import (
     financial_statement_result_description,
     xbrl_query_result_description,
@@ -149,6 +151,10 @@ _FINS_READ_TOOL_NAMES = (
     "get_page_content",
     "get_financial_statement",
     "query_xbrl_facts",
+    "list_document_assets",
+    "read_original_text",
+    "read_original_structure",
+    "query_original_facts",
 )
 _FINANCIAL_HTML_DOCUMENT_ID: Final[str] = "aapl-html-2024-10k"
 _FINANCIAL_HTML_PRIMARY_DOCUMENT: Final[str] = "aapl-html-2024-10k.html"
@@ -3179,7 +3185,7 @@ def test_fins_read_tools_do_not_import_retired_adapter() -> None:
 
 
 def test_fins_read_tool_schemas_do_not_expose_execution_context(tmp_path: Path) -> None:
-    """九个 Fins read tools 的 LLM-facing schema 不得暴露治理字段。"""
+    """十三个 Fins read tools 的 LLM-facing schema 不得暴露治理字段。"""
 
     workspace_root = _build_fins_workspace(tmp_path)
     definitions = _discover_definitions(workspace_root)
@@ -3206,16 +3212,23 @@ def test_fins_read_tool_schemas_do_not_expose_execution_context(tmp_path: Path) 
         assert properties["ticker"] == ticker_schema
         if definition.name == "list_documents":
             assert "document_id" not in properties
+        elif definition.name in {"list_document_assets", "read_original_text", "read_original_structure", "query_original_facts"}:
+            assert "exact" in str(properties["document_id"])
         else:
             assert properties["document_id"] == document_id_schema
         assert "execution_context" not in properties
         assert "cancellation_token" not in properties
         assert "execution_context" not in required
         assert "cancellation_token" not in required
+        description = definition.schema.function.description
+        if definition.name in {"read_original_structure", "query_original_facts"}:
+            assert all(term in description for term in ("resolved=", "unbound=", "ambiguous=", "quote(", "duplicate(布尔", "整个资产"))
+        elif definition.name == "get_document_sections":
+            assert all(term in description for term in ("source_asset", "filename", "sha256", "内容校验标签"))
 
 
 def test_fins_read_definitions_declare_process_backed_execution(tmp_path: Path) -> None:
-    """九个 Fins read definitions 必须声明 process-backed execution。"""
+    """十三个 Fins read definitions 必须声明 process-backed execution。"""
 
     workspace_root = _build_fins_workspace(tmp_path)
     definitions = _discover_definitions(workspace_root)
@@ -3681,7 +3694,7 @@ def test_default_runtime_public_close_retries_real_snapshot_cleanup(
 def test_read_outputs_never_expose_revision_internal_key_local_uri_or_temp_path(
     tmp_path: Path,
 ) -> None:
-    """九个 read tools 的成功、失败、取消投影均不得泄漏 storage 私有语义。
+    """十三个 read tools 的成功、失败、取消投影均不得泄漏 storage 私有语义。
 
     Args:
         tmp_path: pytest 临时目录。
@@ -3714,6 +3727,10 @@ def test_read_outputs_never_expose_revision_internal_key_local_uri_or_temp_path(
     ).parent.name
     runtime = DefaultFinsRuntime.create(workspace_root=workspace_root)
     read_runtime = runtime.get_read_runtime()
+    publish_original(workspace_root)
+    original_listing = read_runtime.list_document_assets(ticker="TEST", document_id="original-doc", source_kind=SourceKind.FILING)
+    original_asset = original_listing["assets"][0]["asset"]
+    original_select: dict[str, JsonValue] = {"ticker": "TEST", "document_id": "original-doc", "source_kind": "filing", "filename": "main.html", "expected_sha256": original_asset["sha256"]}
     definitions = _definitions_by_name(_definitions_for_read_runtime(read_runtime, workspace_root))
     completed_outcomes: dict[str, ToolExecutionOutcome] = {}
     try:
@@ -3796,6 +3813,13 @@ def test_read_outputs_never_expose_revision_internal_key_local_uri_or_temp_path(
                 "concepts": ["Revenue"],
             },
         }
+        completed_arguments.update({
+            "list_document_assets": {"ticker": "TEST", "document_id": "original-doc", "source_kind": "filing"},
+            "read_original_text": original_select,
+            "read_original_structure": original_select,
+            "query_original_facts": {**original_select, "concepts": [{"namespace_uri": "urn:concept", "local_name": "Flag"}]},
+        })
+        assert set(completed_arguments) == set(_FINS_READ_TOOL_NAMES)
         completed_outcomes["get_document_sections"] = sections_outcome
         completed_outcomes["list_tables"] = tables_outcome
         for tool_name, arguments in completed_arguments.items():
@@ -3834,7 +3858,11 @@ def test_read_outputs_never_expose_revision_internal_key_local_uri_or_temp_path(
             assert isinstance(cancelled, ToolCancelledOutcome)
             projected_outputs.append(_project_llm_facing_outcome(cancelled))
 
+        assert len(projected_outputs) == len(_FINS_READ_TOOL_NAMES) * 3
+        original_revision = _read_snapshot_revision(source_repository, "TEST", "original-doc", SourceKind.FILING)
+        original_key = repository_set.core._source_meta_path_for_read("TEST", "original-doc", SourceKind.FILING).parent.name
         forbidden_values = (
+            original_revision.token, original_key,
             revision.token,
             source_private_key,
             str(workspace_root),
@@ -4831,6 +4859,9 @@ def test_fins_provider_explicit_limits_shape_truncate_specs(tmp_path: Path) -> N
     assert _truncate_limit(definitions["query_xbrl_facts"], "max_items") == 1250
     for definition in definitions.values():
         truncate = definition.truncate
+        if definition.name == "list_document_assets":
+            assert truncate is None
+            continue
         assert isinstance(truncate, ToolTruncateSpec)
         assert "processor_cache_max_entries" not in truncate.limits
 
