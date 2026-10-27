@@ -65,8 +65,17 @@ def convert_pdf_bytes_to_docling_payload(
     """将 PDF 字节流转换为 DoclingDocument 兼容的结构化字典。
 
     在低内存环境（1.6GB 以下）下，Docling 加载 PyTorch/transformers
-    时会因内存不足而挂起。本函数作为降级方案，优先使用 pdf-inspector
-    （纯 Rust，无 ML 依赖）快速提取文本与表格，失败时回退 pypdf。
+    时会因内存不足而挂起。本函数作为降级方案，按三级链路提取：
+
+    1. ``pdf-inspector``（纯 Rust，无 ML 依赖）：表格切分最细，但表格
+       单元格对 CJK 子集字库存在字符映射缺陷；
+    2. ``poppler``（``pdftotext -bbox-layout``）：依赖字体 CMap 解码，
+       对上述子集字库不乱码，代价是表格切分较粗；
+    3. ``pypdf``：最终兜底，不含表格。
+
+    每一级在「抛异常」或「产出被乱码污染」时都会继续降级。乱码判定分为
+    正文层（:func:`_is_text_garbled`）与表格层（:func:`_is_table_garbled`）
+    两条独立路径——正文正常不代表表格正常，两者必须分别检查。
 
     Args:
         raw_data: PDF 原始字节内容。
@@ -163,6 +172,15 @@ def _convert_via_pdf_inspector(
     # 解析 markdown → 文本块 + 表格
     # 文本块仅用于兜底；表格是 pdf-inspector 的核心价值（结构化提取）
     _text_blocks, tables = _parse_markdown(markdown)
+
+    # 表格单元格走的是独立的字形映射路径，正文正常不代表表格正常：
+    # 同一份 PDF 里「人民幣千元」在正文可正确解码，在表格单元格里却是
+    # 一串 U+FFFD。这类污染无法靠正文判定发现，必须单独检查表格层，
+    # 否则下面的文本层乱码检查会通过，poppler 永远不会被调用。
+    if _is_table_garbled(tables):
+        raise RuntimeError(
+            "pdf-inspector 表格单元格乱码（CID 子集字库），转交 poppler 重建"
+        )
 
     # 文本层使用 pypdf 提取（中文解码正确率高于 pdf-inspector，
     # 后者对 CJK 子集字体存在 issue #246 的乱码缺陷）。
@@ -595,6 +613,34 @@ def _is_text_garbled(blocks: list[str], *, min_len: int = 200) -> bool:
     hanzi = sum(1 for c in text if 0x4E00 <= ord(c) <= 0x9FFF)
     unusual = sum(1 for c in text if _is_in_garbled_blocks(c))
     return unusual > 0 and unusual > hanzi * 2
+
+
+def _is_table_garbled(
+    tables: list[list[list[str]]],
+    *,
+    min_chars: int = 200,
+    max_bad: int = 10,
+) -> bool:
+    """启发式判断表格单元格是否被乱码污染。
+
+    判据与 :func:`_is_text_garbled` 不同：表格里汉字密度天然偏低（多为
+    数字、单位和标点），若沿用「乱码数 > 汉字数 × 2」的比例判据会大量
+    漏判——实测一份 20MB 港股年报的表格里有 2,360 个 U+FFFD，而正文
+    汉字有 13 万余，比例判据永远不触发。因此这里改用绝对数量阈值。
+
+    Args:
+        tables: 表格列表，每张表为「行 → 单元格文本」的二维数组。
+        min_chars: 参与判定的最低表格总字符数，过短不判定以避免误判。
+        max_bad: 乱码字符数量阈值，达到即判为污染。
+
+    Returns:
+        是否被乱码污染。
+    """
+    text = "".join(cell for table in tables for row in table for cell in row)
+    if len(text) < min_chars:
+        return False
+    bad = sum(1 for c in text if c == "\ufffd" or _is_in_garbled_blocks(c))
+    return bad >= max_bad
 
 
 def _parse_poppler_bbox(
